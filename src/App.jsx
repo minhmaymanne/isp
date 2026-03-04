@@ -1,0 +1,720 @@
+import { useState, useEffect, useRef, useCallback } from "react";
+import { TARGETS, COLO_MAP, PHASES, BOOT_LINES, detectISP } from "./data.js";
+import {
+  fetchCFTrace, fetchGeoIP, measureLatency,
+  measureDownload, measureUpload, probeWAN,
+  probeDNS, readNetworkInfo, readResourceTiming,
+  probeInternationalTargets, scanGateways, probeGateway,
+  bufferBloatTest, mean,
+} from "./engines.js";
+import { crossAnalyze, calculateScore, computeVerdicts } from "./analysis.js";
+
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+function gradeOf(s) {
+  if (s >= 92) return { g: "S+", c: "#00ffd5", l: "EXCEPTIONAL" };
+  if (s >= 80) return { g: "A", c: "#00e676", l: "EXCELLENT" };
+  if (s >= 65) return { g: "B", c: "#c6ff00", l: "GOOD" };
+  if (s >= 50) return { g: "C", c: "#ffd600", l: "FAIR" };
+  return { g: "D", c: "#ff1744", l: "POOR" };
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  CANVAS: HEX GRID + PARTICLES + DATA RAIN
+// ═══════════════════════════════════════════════════════════════════════
+function CommandCanvas({ phase }) {
+  const ref = useRef(null);
+  const frameRef = useRef(0);
+  const particles = useRef([]);
+  const streams = useRef([]);
+
+  useEffect(() => {
+    const c = ref.current; if (!c) return;
+    const ctx = c.getContext("2d");
+    let W, H;
+    const resize = () => { W = c.width = window.innerWidth; H = c.height = window.innerHeight; };
+    resize();
+    const N = 55;
+    particles.current = Array.from({ length: N }, () => ({
+      x: Math.random() * W, y: Math.random() * H,
+      vx: (Math.random() - .5) * .35, vy: (Math.random() - .5) * .35,
+      r: Math.random() * 1.2 + .3, life: Math.random(),
+    }));
+    const cols = Math.floor(W / 20);
+    streams.current = Array.from({ length: cols }, () => ({
+      y: Math.random() * H * 2 - H, speed: Math.random() * 1.5 + .8,
+      len: Math.floor(Math.random() * 12 + 4),
+    }));
+    let running = true;
+    const active = phase === "running" || phase === "done";
+    const draw = (t) => {
+      if (!running) return;
+      ctx.clearRect(0, 0, W, H);
+      const vg = ctx.createRadialGradient(W / 2, H / 2, W * .15, W / 2, H / 2, W * .75);
+      vg.addColorStop(0, "transparent"); vg.addColorStop(1, "rgba(0,0,0,.5)");
+      ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+      const sz = 42, h = sz * Math.sqrt(3);
+      for (let row = -1; row < H / h + 1; row++) {
+        for (let col = -1; col < W / (sz * 1.5) + 1; col++) {
+          const x = col * sz * 1.5, y = row * h + (col % 2 ? h / 2 : 0);
+          const pulse = Math.sin(t * .0008 + col * .25 + row * .18) * .5 + .5;
+          ctx.strokeStyle = active && pulse > .88 ? `rgba(0,255,213,${pulse * .05})` : (active ? "rgba(0,180,216,.025)" : "rgba(0,180,216,.012)");
+          ctx.lineWidth = .5; ctx.beginPath();
+          for (let i = 0; i < 6; i++) {
+            const a = Math.PI / 3 * i - Math.PI / 6;
+            const px = x + sz * .42 * Math.cos(a), py = y + sz * .42 * Math.sin(a);
+            i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+          }
+          ctx.closePath(); ctx.stroke();
+        }
+      }
+      if (active) {
+        ctx.font = "9px 'IBM Plex Mono',monospace";
+        for (const s of streams.current) {
+          s.y += s.speed; if (s.y > H + 200) s.y = -80;
+          const x = streams.current.indexOf(s) * 20;
+          for (let i = 0; i < s.len; i++) {
+            const cy = s.y - i * 13; if (cy < -13 || cy > H + 13) continue;
+            const alpha = i === 0 ? .45 : Math.max(0, (1 - i / s.len) * .12);
+            ctx.fillStyle = i === 0 ? `rgba(0,255,213,${alpha})` : `rgba(0,180,216,${alpha})`;
+            ctx.fillText(String.fromCharCode(0x30A0 + Math.floor(Math.random() * 96)), x, cy);
+          }
+        }
+      }
+      const ps = particles.current;
+      for (const p of ps) { p.x += p.vx * (active ? 2 : 1); p.y += p.vy * (active ? 2 : 1); if (p.x < 0) p.x = W; if (p.x > W) p.x = 0; if (p.y < 0) p.y = H; if (p.y > H) p.y = 0; }
+      for (let i = 0; i < ps.length; i++) {
+        for (let j = i + 1; j < ps.length; j++) {
+          const dx = ps[i].x - ps[j].x, dy = ps[i].y - ps[j].y, d2 = dx * dx + dy * dy;
+          if (d2 < 14000) { const a = (1 - d2 / 14000) * (active ? .07 : .025); ctx.beginPath(); ctx.moveTo(ps[i].x, ps[i].y); ctx.lineTo(ps[j].x, ps[j].y); ctx.strokeStyle = `rgba(0,255,213,${a})`; ctx.lineWidth = .4; ctx.stroke(); }
+        }
+      }
+      for (const p of ps) { const glow = Math.sin(t * .003 + p.life * 10) * .4 + .6; ctx.beginPath(); ctx.arc(p.x, p.y, p.r * glow, 0, Math.PI * 2); ctx.fillStyle = `rgba(0,255,213,${glow * (active ? .2 : .08)})`; ctx.fill(); }
+      frameRef.current = requestAnimationFrame(draw);
+    };
+    frameRef.current = requestAnimationFrame(draw);
+    window.addEventListener("resize", resize);
+    return () => { running = false; cancelAnimationFrame(frameRef.current); window.removeEventListener("resize", resize); };
+  }, [phase]);
+  return <canvas ref={ref} style={{ position: "fixed", inset: 0, zIndex: 0, pointerEvents: "none" }} />;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  RADAR SWEEP
+// ═══════════════════════════════════════════════════════════════════════
+function RadarSweep({ size = 250, score, active }) {
+  const g = score != null ? gradeOf(score) : { c: "#00b4d8", g: "—", l: "SCANNING" };
+  const [disp, setDisp] = useState(0);
+  const [sweep, setSweep] = useState(0);
+  useEffect(() => { if (!active && score == null) return; const i = setInterval(() => setSweep(p => (p + 2.5) % 360), 30); return () => clearInterval(i); }, [active, score]);
+  useEffect(() => { if (score == null) { setDisp(0); return; } let c = 0; const i = setInterval(() => { c++; if (c > score) { clearInterval(i); return; } setDisp(c); }, 22); return () => clearInterval(i); }, [score]);
+  const r = size / 2 - 22, cx = size / 2, cy = size / 2;
+  return (
+    <div style={{ position: "relative", width: size, height: size }}>
+      <div style={{ position: "absolute", inset: -35, borderRadius: "50%", background: `radial-gradient(circle,${g.c}08 0%,transparent 55%)`, filter: "blur(35px)" }} />
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        <defs>
+          <radialGradient id="rg"><stop offset="0%" stopColor={g.c} stopOpacity=".12" /><stop offset="100%" stopColor={g.c} stopOpacity="0" /></radialGradient>
+          <filter id="gl"><feGaussianBlur stdDeviation="3" result="g" /><feMerge><feMergeNode in="g" /><feMergeNode in="SourceGraphic" /></feMerge></filter>
+        </defs>
+        {[.25, .5, .75, 1].map((f, i) => <circle key={i} cx={cx} cy={cy} r={r * f} fill="none" stroke="rgba(0,180,216,.05)" strokeWidth=".5" strokeDasharray={i < 3 ? "2 5" : "none"} />)}
+        {[0, 45, 90, 135].map(a => <line key={a} x1={cx + Math.cos(a * Math.PI / 180) * r * .12} y1={cy + Math.sin(a * Math.PI / 180) * r * .12} x2={cx + Math.cos(a * Math.PI / 180) * r} y2={cy + Math.sin(a * Math.PI / 180) * r} stroke="rgba(0,180,216,.035)" strokeWidth=".5" />)}
+        {active && <><line x1={cx} y1={cy} x2={cx + Math.cos(sweep * Math.PI / 180) * r} y2={cy + Math.sin(sweep * Math.PI / 180) * r} stroke={g.c} strokeWidth="1" opacity=".35" filter="url(#gl)" />
+          <path d={`M${cx},${cy} L${cx + Math.cos(sweep * Math.PI / 180) * r},${cy + Math.sin(sweep * Math.PI / 180) * r} A${r},${r} 0 0,0 ${cx + Math.cos((sweep - 35) * Math.PI / 180) * r},${cy + Math.sin((sweep - 35) * Math.PI / 180) * r} Z`} fill="url(#rg)" opacity=".5" /></>}
+        {score != null && (() => { const pct = disp / 100, sA = -90, eA = sA + pct * 360, sR = sA * Math.PI / 180, eR = eA * Math.PI / 180, rr = r + 7; return <path d={`M${cx + rr * Math.cos(sR)},${cy + rr * Math.sin(sR)} A${rr},${rr} 0 ${pct > .5 ? 1 : 0},1 ${cx + rr * Math.cos(eR)},${cy + rr * Math.sin(eR)}`} fill="none" stroke={g.c} strokeWidth="3" strokeLinecap="round" filter="url(#gl)" opacity=".8" />; })()}
+        {Array.from({ length: 60 }).map((_, i) => { const a = (i * 6 - 90) * Math.PI / 180, m = i % 5 === 0; return <line key={i} x1={cx + (r + (m ? 10 : 12)) * Math.cos(a)} y1={cy + (r + (m ? 10 : 12)) * Math.sin(a)} x2={cx + (r + (m ? 18 : 15)) * Math.cos(a)} y2={cy + (r + (m ? 18 : 15)) * Math.sin(a)} stroke={m ? "rgba(0,255,213,.12)" : "rgba(0,180,216,.05)"} strokeWidth={m ? 1 : .5} />; })}
+        {active && TARGETS.slice(0, 8).map((t, i) => { const a = (i * 45 + sweep * .25) * Math.PI / 180, d = r * (.25 + Math.sin(i * 2.1) * .35); return <circle key={i} cx={cx + d * Math.cos(a)} cy={cy + d * Math.sin(a)} r="2.5" fill={g.c} opacity={Math.sin(sweep * .025 + i) * .35 + .25} filter="url(#gl)" />; })}
+      </svg>
+      <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+        {score != null ? <>
+          <div style={{ fontSize: 12, fontWeight: 800, color: g.c, letterSpacing: 8, fontFamily: "var(--ff-display)", textShadow: `0 0 25px ${g.c}40` }}>{g.g}</div>
+          <div style={{ fontSize: 54, fontWeight: 900, fontFamily: "var(--ff-display)", color: "#e0f7fa", lineHeight: 1, textShadow: `0 0 40px ${g.c}20` }}>{disp}</div>
+          <div style={{ fontSize: 8, color: "rgba(255,255,255,.18)", letterSpacing: 4, marginTop: 2 }}>/ 100</div>
+          <div style={{ fontSize: 9, color: g.c, fontWeight: 600, marginTop: 8, letterSpacing: 3 }}>{g.l}</div>
+        </> : active ? <div style={{ fontSize: 10, color: "#00ffd5", fontFamily: "var(--ff-display)", animation: "pulse 1.5s ease infinite", letterSpacing: 5 }}>SCANNING</div>
+          : <div style={{ fontSize: 8, color: "rgba(255,255,255,.06)", letterSpacing: 4 }}>STANDBY</div>}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  SPEED GAUGE
+// ═══════════════════════════════════════════════════════════════════════
+function SpeedGauge({ value, max, label, unit, color = "#00ffd5", size = 135 }) {
+  const [anim, setAnim] = useState(0);
+  useEffect(() => { if (value == null) return; let f = 0; const i = setInterval(() => { f += max / 55; if (f >= value) { setAnim(value); clearInterval(i); return; } setAnim(f); }, 22); return () => clearInterval(i); }, [value, max]);
+  const r = size / 2 - 14, cx = size / 2, cy = size / 2, startA = 140, endA = 400, range = endA - startA;
+  const pct = clamp((anim || 0) / max, 0, 1), valA = startA + pct * range;
+  const arc = (f, t, R) => { const fr = f * Math.PI / 180, tr = t * Math.PI / 180; return `M${cx + R * Math.cos(fr)},${cy + R * Math.sin(fr)} A${R},${R} 0 ${t - f > 180 ? 1 : 0},1 ${cx + R * Math.cos(tr)},${cy + R * Math.sin(tr)}`; };
+  return (
+    <div style={{ position: "relative", width: size, height: size }}>
+      <svg width={size} height={size}>
+        <defs><linearGradient id={`sg${label}`} x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor={color} /><stop offset="100%" stopColor={color} stopOpacity=".3" /></linearGradient></defs>
+        <path d={arc(startA, endA, r)} fill="none" stroke="rgba(255,255,255,.03)" strokeWidth="5" strokeLinecap="round" />
+        {Array.from({ length: 21 }).map((_, i) => { const a = (startA + i * (range / 20)) * Math.PI / 180, m = i % 5 === 0; return <line key={i} x1={cx + (r - 5) * Math.cos(a)} y1={cy + (r - 5) * Math.sin(a)} x2={cx + (r + (m ? 5 : 2)) * Math.cos(a)} y2={cy + (r + (m ? 5 : 2)) * Math.sin(a)} stroke={m ? "rgba(255,255,255,.1)" : "rgba(255,255,255,.03)"} strokeWidth={m ? 1 : .5} />; })}
+        {pct > 0 && <path d={arc(startA, valA, r)} fill="none" stroke={`url(#sg${label})`} strokeWidth="5" strokeLinecap="round" style={{ filter: `drop-shadow(0 0 6px ${color}40)` }} />}
+        {pct > 0 && (() => { const a = valA * Math.PI / 180; return <circle cx={cx + r * Math.cos(a)} cy={cy + r * Math.sin(a)} r="4" fill={color} style={{ filter: `drop-shadow(0 0 8px ${color})` }} />; })()}
+      </svg>
+      <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", paddingTop: 8 }}>
+        <div style={{ fontSize: 26, fontWeight: 900, fontFamily: "var(--ff-display)", color: "#e0f7fa", textShadow: `0 0 15px ${color}25` }}>{value != null ? Math.round(anim) : "—"}</div>
+        <div style={{ fontSize: 9, color: "rgba(255,255,255,.25)", letterSpacing: 2 }}>{unit}</div>
+        <div style={{ fontSize: 9, color, fontWeight: 700, letterSpacing: 3, marginTop: 3 }}>{label}</div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  OSCILLOSCOPE
+// ═══════════════════════════════════════════════════════════════════════
+function Oscilloscope({ data = [], color = "#00ffd5", height = 65, label, active }) {
+  const [noise, setNoise] = useState([]);
+  useEffect(() => { if (!active) return; const i = setInterval(() => setNoise(Array.from({ length: 40 }, () => Math.random() * 30 + 10)), 100); return () => clearInterval(i); }, [active]);
+  const d = data.length > 0 ? data : noise; if (!d.length) return null;
+  const mx = Math.max(...d) * 1.2 || 1;
+  const pts = d.map((v, i) => [(i / (d.length - 1 || 1)) * 100, height - ((v / mx) * (height - 8)) - 4]);
+  return (
+    <div>
+      {label && <div style={{ fontSize: 9, color: "rgba(255,255,255,.25)", letterSpacing: 2, marginBottom: 4 }}>{label}</div>}
+      <div style={{ background: "rgba(0,0,0,.35)", borderRadius: 3, border: "1px solid rgba(0,180,216,.06)", padding: 3, position: "relative", overflow: "hidden" }}>
+        <svg viewBox={`0 0 100 ${height}`} preserveAspectRatio="none" style={{ width: "100%", height, display: "block" }}>
+          {[.25, .5, .75].map(f => <line key={f} x1="0" y1={height * f} x2="100" y2={height * f} stroke="rgba(0,180,216,.03)" strokeWidth=".3" />)}
+          <defs><linearGradient id={`of${color.slice(1)}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity=".18" /><stop offset="100%" stopColor={color} stopOpacity="0" /></linearGradient></defs>
+          <polygon points={[`0,${height}`, ...pts.map(p => p.join(",")), `100,${height}`].join(" ")} fill={`url(#of${color.slice(1)})`} />
+          <polyline points={pts.map(p => p.join(",")).join(" ")} fill="none" stroke={color} strokeWidth="1.2" strokeLinejoin="round" vectorEffect="non-scaling-stroke" style={{ filter: `drop-shadow(0 0 4px ${color}50)` }} />
+          {pts.length > 0 && <circle cx={pts[pts.length - 1][0]} cy={pts[pts.length - 1][1]} r="1.8" fill={color} style={{ filter: `drop-shadow(0 0 5px ${color})` }} />}
+        </svg>
+        {active && <div style={{ position: "absolute", top: 0, bottom: 0, width: 2, background: `linear-gradient(180deg,transparent,${color}35,transparent)`, animation: "oscScan 2s linear infinite" }} />}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  HUD PANEL + METRIC
+// ═══════════════════════════════════════════════════════════════════════
+function HudPanel({ children, title, icon, status, accent = "#00b4d8", delay = 0, span, glow }) {
+  const cs = 10;
+  const Corner = ({ pos }) => {
+    const s = { position: "absolute", width: cs, height: cs };
+    const b = `1.5px solid ${accent}35`;
+    if (pos === "tl") return <div style={{ ...s, top: -1, left: -1, borderTop: b, borderLeft: b }} />;
+    if (pos === "tr") return <div style={{ ...s, top: -1, right: -1, borderTop: b, borderRight: b }} />;
+    if (pos === "bl") return <div style={{ ...s, bottom: -1, left: -1, borderBottom: b, borderLeft: b }} />;
+    return <div style={{ ...s, bottom: -1, right: -1, borderBottom: b, borderRight: b }} />;
+  };
+  return (
+    <div style={{ position: "relative", background: "rgba(4,10,20,.72)", backdropFilter: "blur(12px) saturate(1.2)", border: `1px solid ${accent}10`, borderRadius: 2, overflow: "hidden", animation: `hudIn .5s ease ${delay}s both`, gridColumn: span ? `span ${span}` : "auto", boxShadow: glow ? `0 0 25px ${accent}06, inset 0 0 20px ${accent}03` : "none" }}>
+      <Corner pos="tl" /><Corner pos="tr" /><Corner pos="bl" /><Corner pos="br" />
+      {title && <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px 0" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          {icon && <span style={{ fontSize: 13, filter: `drop-shadow(0 0 3px ${accent}35)` }}>{icon}</span>}
+          <span style={{ fontSize: 10, fontWeight: 700, color: accent, letterSpacing: 3, fontFamily: "var(--ff-display)" }}>{title}</span>
+        </div>
+        {status && <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <div style={{ width: 5, height: 5, borderRadius: "50%", background: status === "done" ? "#00e676" : status === "active" ? "#00ffd5" : "rgba(255,255,255,.08)", boxShadow: status === "active" ? "0 0 6px #00ffd5" : "none", animation: status === "active" ? "pulse .8s infinite" : "none" }} />
+          <span style={{ fontSize: 8, color: "rgba(255,255,255,.25)", letterSpacing: 2, fontFamily: "var(--ff-display)" }}>{status.toUpperCase()}</span>
+        </div>}
+      </div>}
+      <div style={{ padding: "10px 16px 16px" }}>{children}</div>
+      {glow && <div style={{ position: "absolute", bottom: 0, left: "10%", right: "10%", height: 1, background: `linear-gradient(90deg,transparent,${accent}25,transparent)` }} />}
+    </div>
+  );
+}
+
+function M({ l, v, u, q, s }) {
+  const c = q === "good" ? "#00ffd5" : q === "ok" ? "#c6ff00" : q === "warn" ? "#ffd600" : q === "bad" ? "#ff1744" : null;
+  return (<div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", padding: `${s ? 3 : 5}px 0`, borderBottom: "1px solid rgba(255,255,255,.03)" }}>
+    <span style={{ fontSize: s ? 9 : 11, color: "rgba(255,255,255,.45)", fontWeight: 500 }}>{l}</span>
+    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+      <span style={{ fontSize: s ? 12 : 14, fontWeight: 700, color: "#f0f8ff", fontFamily: "var(--ff-display)" }}>{v ?? "—"}</span>
+      {u && <span style={{ fontSize: 8, color: "rgba(255,255,255,.25)" }}>{u}</span>}
+      {c && <span style={{ width: 5, height: 5, borderRadius: "50%", background: c, boxShadow: `0 0 5px ${c}`, display: "inline-block" }} />}
+    </div>
+  </div>);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  TARGET GRID + FINDING CARD + PHASE TIMELINE + BOOT TERMINAL
+// ═══════════════════════════════════════════════════════════════════════
+function TargetGrid({ targets, activeId }) {
+  return (<div className="np-targets-grid">
+    {TARGETS.map(t => {
+      const r = targets?.[t.id], isA = activeId === t.id;
+      const lc = !r ? "rgba(255,255,255,.05)" : r.avg < 50 ? "#00ffd5" : r.avg < 100 ? "#c6ff00" : r.avg < 200 ? "#ffd600" : "#ff9100";
+      return (<div key={t.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", borderRadius: 3, background: isA ? "rgba(0,255,213,.04)" : "rgba(255,255,255,.01)", border: `1px solid ${isA ? "rgba(0,255,213,.15)" : r ? "rgba(255,255,255,.04)" : "rgba(255,255,255,.02)"}`, transition: "all .3s", position: "relative", overflow: "hidden" }}>
+        {isA && <div style={{ position: "absolute", inset: 0, background: "linear-gradient(90deg,transparent,rgba(0,255,213,.05),transparent)", animation: "targetScan .8s linear infinite" }} />}
+        <span style={{ fontSize: 15, position: "relative", zIndex: 1 }}>{t.icon}</span>
+        <div style={{ flex: 1, position: "relative", zIndex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 10, fontWeight: 600, color: r ? "rgba(255,255,255,.6)" : "rgba(255,255,255,.15)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.name}</div>
+          <div style={{ fontSize: 8, color: "rgba(255,255,255,.2)" }}>{t.cat} • {t.region}</div>
+        </div>
+        <div style={{ position: "relative", zIndex: 1, textAlign: "right" }}>
+          {isA ? <span style={{ fontSize: 9, color: "#00ffd5", animation: "pulse .5s infinite" }}>●●●</span>
+            : r ? <><div style={{ fontSize: 13, fontWeight: 800, color: lc, fontFamily: "var(--ff-display)" }}>{r.avg}</div><div style={{ fontSize: 7, color: "rgba(255,255,255,.2)" }}>ms</div></>
+              : <div style={{ fontSize: 8, color: "rgba(255,255,255,.06)" }}>—</div>}
+        </div>
+      </div>);
+    })}
+  </div>);
+}
+
+function FindingCard({ icon, title, desc, severity, delay = 0 }) {
+  const sc = severity === "good" ? "#00ffd5" : severity === "info" ? "#00b4d8" : severity === "warn" ? "#ffd600" : "#ff1744";
+  return (<div style={{ padding: "14px 16px", borderRadius: 3, position: "relative", overflow: "hidden", background: `linear-gradient(135deg,${sc}05,transparent)`, border: `1px solid ${sc}15`, animation: `hudIn .4s ease ${delay}s both` }}>
+    <div style={{ position: "absolute", top: 0, left: 0, width: 3, height: "100%", background: sc, boxShadow: `0 0 8px ${sc}40` }} />
+    <div style={{ display: "flex", alignItems: "start", gap: 10, paddingLeft: 8 }}>
+      <span style={{ fontSize: 18, filter: `drop-shadow(0 0 4px ${sc}40)`, flexShrink: 0, marginTop: 1 }}>{icon}</span>
+      <div><div style={{ fontSize: 13, fontWeight: 700, color: sc, marginBottom: 4, lineHeight: 1.3 }}>{title}</div>
+        <div style={{ fontSize: 12, color: "rgba(255,255,255,.65)", lineHeight: 1.8 }}>{desc}</div></div>
+    </div>
+  </div>);
+}
+
+function PhaseTimeline({ phases, currentIdx }) {
+  return (<div style={{ display: "flex", alignItems: "center", gap: 0, overflow: "hidden", padding: "0 2px" }}>
+    {phases.map((p, i) => {
+      const done = i < currentIdx, act = i === currentIdx;
+      const c = done ? "#00ffd5" : act ? "#00b4d8" : "rgba(255,255,255,.04)";
+      return (<div key={p.id} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+        <div style={{ width: "100%", height: 2, background: done ? c : act ? `linear-gradient(90deg,${c},transparent)` : "rgba(255,255,255,.02)", borderRadius: 1, transition: "all .5s", boxShadow: act ? `0 0 6px ${c}35` : "none" }} />
+        <div style={{ fontSize: 7, color: done || act ? c : "rgba(255,255,255,.06)", letterSpacing: 1, textAlign: "center", fontFamily: "var(--ff-display)", whiteSpace: "nowrap" }}>{p.name}</div>
+      </div>);
+    })}
+  </div>);
+}
+
+function BootTerminal({ lines }) {
+  const [vis, setVis] = useState([]);
+  const [cur, setCur] = useState(true);
+  const ref = useRef(null);
+  useEffect(() => { let i = 0; const t = setInterval(() => { if (i >= lines.length) { clearInterval(t); return; } setVis(p => [...p, lines[i]]); i++; }, 120); const c = setInterval(() => setCur(p => !p), 350); return () => { clearInterval(t); clearInterval(c); }; }, [lines]);
+  useEffect(() => { ref.current?.scrollTo(0, 99999); }, [vis]);
+  return (<div ref={ref} style={{ background: "rgba(0,4,12,.92)", border: "1px solid rgba(0,180,216,.12)", borderRadius: 3, padding: "12px 14px", maxHeight: 260, overflow: "auto", fontFamily: "var(--ff-mono)", fontSize: 9, lineHeight: 1.8, color: "rgba(0,255,213,.65)", boxShadow: "0 0 40px rgba(0,255,213,.02), inset 0 0 50px rgba(0,0,0,.5)" }}>
+    {vis.map((l, i) => {
+      const isL = i === vis.length - 1, ok = typeof l === "string" && (l.includes("nominal") || l.includes("ready") || l.includes("loaded") || l.includes("available"));
+      return (<div key={i} style={{ opacity: isL ? 1 : .45, color: ok ? "#00e676" : "rgba(0,255,213,.55)" }}>
+        <span style={{ color: "rgba(255,255,255,.08)", marginRight: 6 }}>{String(i + 1).padStart(2, "0")}</span>{l}{isL && cur && <span style={{ color: "#00ffd5", marginLeft: 2 }}>█</span>}
+      </div>);
+    })}
+  </div>);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  MAIN APP — Real Engines Orchestration
+// ═══════════════════════════════════════════════════════════════════════
+export default function App() {
+  const [phase, setPhase] = useState("idle");
+  const [phaseIdx, setPhaseIdx] = useState(-1);
+  const [elapsed, setElapsed] = useState(0);
+  const [booted, setBooted] = useState(false);
+
+  // Data states
+  const [trace, setTrace] = useState(null);
+  const [geo, setGeo] = useState(null);
+  const [ispInfo, setIspInfo] = useState(null);
+  const [coloInfo, setColoInfo] = useState(null);
+  const [latencyData, setLatencyData] = useState(null);
+  const [latProg, setLatProg] = useState([]);
+  const [dlData, setDlData] = useState(null);
+  const [ulData, setUlData] = useState(null);
+  const [dnsData, setDnsData] = useState(null);
+  const [targetsDone, setTargetsDone] = useState({});
+  const [scanTarget, setScanTarget] = useState(null);
+  const [gwData, setGwData] = useState(null);
+  const [bloatData, setBloatData] = useState(null);
+  const [findings, setFindings] = useState(null);
+  const [scoreData, setScoreData] = useState(null);
+  const [verdicts, setVerdicts] = useState(null);
+  const [logs, setLogs] = useState([]);
+
+  // UI visibility
+  const [showTrace, setShowTrace] = useState(false);
+  const [showGeo, setShowGeo] = useState(false);
+  const [showLatency, setShowLatency] = useState(false);
+  const [showDl, setShowDl] = useState(false);
+  const [showUl, setShowUl] = useState(false);
+  const [showDns, setShowDns] = useState(false);
+  const [showAnalysis, setShowAnalysis] = useState(false);
+  const [showScore, setShowScore] = useState(false);
+
+  const timerRef = useRef(null);
+  const addLog = useCallback((msg, level = "info") => setLogs(p => [...p, { t: Date.now(), msg, level }].slice(-60)), []);
+
+  useEffect(() => {
+    if (phase === "running" || phase === "booting") { timerRef.current = setInterval(() => setElapsed(e => e + 1), 1000); }
+    else clearInterval(timerRef.current);
+    return () => clearInterval(timerRef.current);
+  }, [phase]);
+
+  const run = useCallback(async () => {
+    // Reset all
+    setPhase("booting"); setPhaseIdx(0); setElapsed(0); setBooted(false);
+    setTrace(null); setGeo(null); setIspInfo(null); setColoInfo(null);
+    setLatencyData(null); setLatProg([]); setDlData(null); setUlData(null);
+    setDnsData(null); setTargetsDone({}); setScanTarget(null);
+    setGwData(null); setBloatData(null);
+    setFindings(null); setScoreData(null); setVerdicts(null);
+    setShowTrace(false); setShowGeo(false); setShowLatency(false);
+    setShowDl(false); setShowUl(false); setShowDns(false);
+    setShowAnalysis(false); setShowScore(false); setLogs([]);
+    addLog("Initiating boot sequence...", "sys");
+    await sleep(2200); setBooted(true); setPhase("running");
+    const collected = {};
+
+    // ═══ Phase 1: CF Trace ═══
+    setPhaseIdx(1); addLog("Acquiring Cloudflare edge trace...", "net");
+    const traceRes = await fetchCFTrace();
+    collected.trace = traceRes; setTrace(traceRes);
+    if (!traceRes._failed) {
+      const ci = COLO_MAP[traceRes.colo]; setColoInfo(ci);
+      setShowTrace(true);
+      addLog(`CF PoP: ${traceRes.colo}${ci ? ` — ${ci.city}` : ""} — ${traceRes._ms}ms`, "ok");
+      addLog(`Protocol: ${traceRes.http || "?"} / ${traceRes.tls || "?"} / ${traceRes.kex || "?"}`, "ok");
+    } else {
+      setShowTrace(true);
+      addLog("CF Trace failed — using fallback data", "warn");
+    }
+
+    // ═══ Phase 2: GeoIP ═══
+    setPhaseIdx(2); addLog("Resolving geolocation...", "net");
+    const geoRes = await fetchGeoIP();
+    collected.geo = geoRes; setGeo(geoRes);
+    if (!geoRes._failed) {
+      const isp = detectISP(geoRes.isp || geoRes.org || "");
+      setIspInfo(isp); setShowGeo(true);
+      addLog(`ISP: ${isp.name} (${geoRes.as || "?"})`, "ok");
+      addLog(`Location: ${geoRes.city}, ${geoRes.country}`, "ok");
+    } else {
+      setShowGeo(true);
+      addLog("GeoIP lookup failed", "warn");
+    }
+
+    // ═══ Phase 3: Latency ═══
+    setPhaseIdx(3); addLog("Latency oscilloscope — 24 samples...", "net");
+    const latRes = await measureLatency((ms, i) => {
+      if (ms != null) setLatProg(p => [...p, ms]);
+    });
+    collected.latency = latRes; setLatencyData(latRes); setShowLatency(true);
+    if (!latRes._failed) {
+      addLog(`Latency: avg=${latRes.avg}ms jitter=${latRes.jitter}ms p90=${latRes.p90}ms`, "ok");
+    } else { addLog("Latency measurement failed", "warn"); }
+
+    // ═══ Phase 4: Download ═══
+    setPhaseIdx(4); addLog("Download bandwidth test...", "net");
+    const dlRes = await measureDownload(p => {
+      addLog(`Download sampling... ${Math.round(p.progress * 100)}%`, "net");
+    });
+    collected.download = dlRes; setDlData(dlRes); setShowDl(true);
+    addLog(`Download: ${dlRes.mbps} Mbps (P90: ${dlRes.p90}, ${dlRes.samples} samples)`, "ok");
+
+    // ═══ Phase 5: Upload ═══
+    setPhaseIdx(5); addLog("Upload bandwidth test...", "net");
+    const ulRes = await measureUpload(p => {
+      addLog(`Upload sampling... ${Math.round(p.progress * 100)}%`, "net");
+    });
+    collected.upload = ulRes; setUlData(ulRes); setShowUl(true);
+    addLog(`Upload: ${ulRes.mbps} Mbps (P90: ${ulRes.p90}, ${ulRes.samples} samples)`, "ok");
+
+    // ═══ Phase 6: DNS ═══
+    setPhaseIdx(6); addLog("DNS resolution timing...", "net");
+    const dnsRes = await probeDNS();
+    collected.dns = dnsRes; setDnsData(dnsRes); setShowDns(true);
+    addLog(`DNS: avg ${dnsRes.avg}ms`, "ok");
+
+    // ═══ Phase 7: International Targets ═══
+    setPhaseIdx(7); addLog(`Scanning ${TARGETS.length} international targets...`, "net");
+    const targetsRes = await probeInternationalTargets((id, result) => {
+      setTargetsDone(p => ({ ...p, [id]: result }));
+      setScanTarget(id);
+      const t = TARGETS.find(x => x.id === id);
+      addLog(`${t?.icon || "•"} ${t?.name || id}: ${result.avg ?? "timeout"}ms via ${t?.region || "?"}`, "ok");
+    });
+    collected.targets = targetsRes;
+    setScanTarget(null);
+
+    // ═══ Phase 8: Gateway + Bloat (optional) ═══
+    addLog("Gateway probe (may skip on HTTPS)...", "net");
+    try {
+      const gw = await scanGateways();
+      if (gw) {
+        addLog(`Gateway found: ${gw.ip} (${gw.hint})`, "ok");
+        const gwRes = await probeGateway(gw.ip);
+        collected.gateway = gwRes; setGwData(gwRes);
+        addLog(`Gateway RTT: avg=${gwRes.avg}ms jitter=${gwRes.jitter}ms`, "ok");
+        const bloatRes = await bufferBloatTest(gw.ip);
+        collected.bloat = bloatRes; setBloatData(bloatRes);
+        if (!bloatRes._skipped) {
+          addLog(`Buffer bloat: ${bloatRes.bloatRatio}x (${bloatRes.idleAvg}ms → ${bloatRes.loadAvg}ms)`, bloatRes.bloatRatio > 2 ? "warn" : "ok");
+        }
+      } else {
+        addLog("No gateway detected (HTTPS mixed content block)", "warn");
+      }
+    } catch {
+      addLog("Gateway probe skipped", "warn");
+    }
+
+    // ═══ Phase 9: Analysis ═══
+    setPhaseIdx(8); addLog("Cross-analysis engine — 12 rules...", "sys");
+    const analysisRes = crossAnalyze(collected);
+    setFindings(analysisRes);
+    addLog(`Analysis: ${analysisRes.length} findings`, "ok");
+
+    const verdictsRes = computeVerdicts(collected);
+    setVerdicts(verdictsRes); setShowAnalysis(true);
+
+    // ═══ Phase 10: Score ═══
+    setPhaseIdx(9); addLog("Computing score...", "sys");
+    await sleep(300);
+    const scoreRes = calculateScore(collected);
+    collected.score = scoreRes;
+    setScoreData(scoreRes); setShowScore(true);
+    addLog(`Score: ${scoreRes.value}/100 — ${scoreRes.grade} (${scoreRes.label})`, "ok");
+    addLog("═══ SCAN COMPLETE ═══", "sys");
+    setPhase("done");
+  }, [addLog]);
+
+  const fmtT = s => `${Math.floor(s / 60).toString().padStart(2, "0")}:${(s % 60).toString().padStart(2, "0")}`;
+  const g = showScore && scoreData ? gradeOf(scoreData.value) : { c: "#00b4d8" };
+
+  return (
+    <div style={{ "--ff-display": "'Orbitron',monospace", "--ff-mono": "'IBM Plex Mono','Fira Code',monospace", minHeight: "100vh", background: "#010610", color: "#c8e6f0", fontFamily: "var(--ff-mono)", position: "relative", overflow: "hidden" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600;700&family=Orbitron:wght@400;500;600;700;800;900&display=swap');
+        *{box-sizing:border-box;margin:0;padding:0}
+        ::-webkit-scrollbar{width:3px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:rgba(0,180,216,.12);border-radius:2px}
+        @keyframes pulse{0%,100%{opacity:1}50%{opacity:.2}}
+        @keyframes hudIn{from{opacity:0;transform:translateY(10px) scale(.98)}to{opacity:1;transform:translateY(0) scale(1)}}
+        @keyframes glitchClip{0%{clip-path:inset(40% 0 61% 0)}20%{clip-path:inset(92% 0 1% 0)}40%{clip-path:inset(43% 0 1% 0)}60%{clip-path:inset(25% 0 58% 0)}80%{clip-path:inset(54% 0 7% 0)}100%{clip-path:inset(58% 0 43% 0)}}
+        @keyframes borderPulse{0%,100%{border-color:rgba(0,255,213,.08)}50%{border-color:rgba(0,255,213,.25)}}
+        @keyframes targetScan{0%{transform:translateX(-100%)}100%{transform:translateX(200%)}}
+        @keyframes oscScan{0%{left:-2px}100%{left:calc(100% + 2px)}}
+        body{overflow-x:hidden;background:#010610}button{font-family:inherit;cursor:pointer}
+        .np-grid{display:grid;grid-template-columns:repeat(12,1fr);gap:10px;align-items:start}
+        .np-c3{grid-column:span 3}.np-c4{grid-column:span 4}.np-c6{grid-column:span 6}.np-c12{grid-column:span 12}
+        .np-findings{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px}
+        .np-targets-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:6px}
+        @media(max-width:768px){
+          .np-grid{grid-template-columns:1fr !important;gap:10px}
+          .np-c3,.np-c4,.np-c6,.np-c12{grid-column:span 1 !important}
+          .np-findings{grid-template-columns:1fr !important}
+          .np-targets-grid{grid-template-columns:repeat(2,1fr) !important}
+        }
+      `}</style>
+
+      <CommandCanvas phase={phase} />
+      <div style={{ position: "fixed", inset: 0, zIndex: 1, pointerEvents: "none", background: "repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.025) 2px,rgba(0,0,0,.025) 4px)" }} />
+      <div style={{ position: "fixed", inset: 0, zIndex: 1, pointerEvents: "none", opacity: .025, backgroundImage: "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")" }} />
+
+      <div style={{ position: "relative", zIndex: 2, maxWidth: 1100, margin: "0 auto", padding: "0 12px 40px" }}>
+        {/* HEADER */}
+        <header style={{ padding: "20px 0 14px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+              <div style={{ width: 5, height: 5, background: "#00ffd5", borderRadius: "50%", boxShadow: "0 0 8px #00ffd5", animation: phase === "running" ? "pulse .7s infinite" : "none" }} />
+              <span style={{ fontSize: 9, letterSpacing: 5, color: "rgba(255,255,255,.2)", fontWeight: 600 }}>SPEED.CCN.VN</span>
+            </div>
+            <h1 style={{ fontSize: 20, fontWeight: 900, fontFamily: "var(--ff-display)", letterSpacing: 10, lineHeight: 1.2, background: "linear-gradient(135deg,#00ffd5 0%,#00b4d8 50%,#7c4dff 100%)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", filter: "drop-shadow(0 0 15px rgba(0,255,213,.12))", position: "relative" }}>
+              NETPROBE
+              {phase === "running" && <span aria-hidden="true" style={{ position: "absolute", left: 2, top: 0, background: "linear-gradient(135deg,#ff1744,#7c4dff)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", animation: "glitchClip 2s infinite linear alternate-reverse", opacity: .1 }}>NETPROBE</span>}
+            </h1>
+            <div style={{ fontSize: 9, color: "rgba(255,255,255,.12)", letterSpacing: 2 }}>NETWORK OPERATIONS CENTER</div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {(phase === "running" || phase === "done") && <div style={{ fontSize: 18, fontFamily: "var(--ff-display)", color: phase === "done" ? g.c : "#00b4d8", fontWeight: 700, letterSpacing: 3, textShadow: `0 0 8px ${phase === "done" ? g.c : "#00b4d8"}25` }}>{fmtT(elapsed)}</div>}
+            {phase === "idle" ? <button onClick={run} style={{ background: "transparent", border: "1px solid rgba(0,255,213,.2)", borderRadius: 3, padding: "12px 32px", animation: "borderPulse 3s ease infinite" }}>
+              <span style={{ color: "#00ffd5", fontSize: 12, fontWeight: 700, fontFamily: "var(--ff-display)", letterSpacing: 6 }}>▶ ENGAGE</span>
+            </button> : phase === "done" ? <button onClick={run} style={{ background: "transparent", border: `1px solid ${g.c}25`, borderRadius: 3, padding: "8px 24px", color: g.c, fontSize: 10, fontFamily: "var(--ff-display)", letterSpacing: 4 }}>↻ RE-SCAN</button> : null}
+          </div>
+        </header>
+
+        {/* TIMELINE */}
+        {(phase === "running" || phase === "done") && phaseIdx >= 0 && <div style={{ marginBottom: 14, animation: "hudIn .3s ease both" }}><PhaseTimeline phases={PHASES} currentIdx={phase === "done" ? PHASES.length : phaseIdx} /></div>}
+
+        {/* BOOT */}
+        {phase === "booting" && !booted && <div style={{ maxWidth: 580, margin: "30px auto", animation: "hudIn .3s ease both" }}><BootTerminal lines={BOOT_LINES} /></div>}
+
+        {/* MAIN GRID */}
+        {(booted || phase === "done") && (
+          <div className="np-grid">
+            {/* INFO BADGES */}
+            {showTrace && <div className="np-c3" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderRadius: 3, background: "rgba(0,255,213,.02)", border: "1px solid rgba(0,255,213,.06)" }}>
+                <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#00ffd5", boxShadow: "0 0 6px #00ffd5" }} />
+                <div><div style={{ fontSize: 8, color: "rgba(255,255,255,.25)", letterSpacing: 2 }}>PUBLIC IP</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, fontFamily: "var(--ff-display)", color: "#f0f8ff" }}>{trace?.ip || "—"}</div></div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderRadius: 3, background: `${(ispInfo?.color || "#666")}08`, border: `1px solid ${(ispInfo?.color || "#666")}20` }}>
+                <div style={{ width: 6, height: 6, borderRadius: "50%", background: ispInfo?.color || "#666", boxShadow: `0 0 6px ${ispInfo?.color || "#666"}` }} />
+                <div><div style={{ fontSize: 8, color: "rgba(255,255,255,.25)", letterSpacing: 2 }}>ISP</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: ispInfo?.color || "#f0f8ff" }}>{ispInfo?.name || geo?.isp || "—"}</div>
+                  <div style={{ fontSize: 9, color: "rgba(255,255,255,.2)" }}>{ispInfo?.tier ? `Tier ${ispInfo.tier}` : ""} {geo?.as ? `• ${geo.as}` : ""}</div></div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderRadius: 3, background: coloInfo?.vn ? "rgba(0,230,118,.03)" : "rgba(255,214,0,.03)", border: `1px solid ${coloInfo?.vn ? "rgba(0,230,118,.12)" : "rgba(255,214,0,.12)"}` }}>
+                <span style={{ fontSize: 16 }}>{coloInfo?.flag || "🌐"}</span>
+                <div><div style={{ fontSize: 8, color: "rgba(255,255,255,.25)", letterSpacing: 2 }}>CF EDGE</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: coloInfo?.vn ? "#00e676" : "#ffd600" }}>{trace?.colo || "?"}{coloInfo ? ` — ${coloInfo.city}` : ""}</div>
+                  <div style={{ fontSize: 9, color: "rgba(255,255,255,.2)" }}>{coloInfo?.vn ? "Optimal ✓" : coloInfo?.nearby ? "Nearby" : "Remote"}</div></div>
+              </div>
+              {showGeo && geo && !geo._failed && <div style={{ padding: "10px 14px", borderRadius: 3, background: "rgba(255,255,255,.01)", border: "1px solid rgba(255,255,255,.04)" }}>
+                <div style={{ fontSize: 8, color: "rgba(255,255,255,.2)", letterSpacing: 2, marginBottom: 4 }}>GEOLOCATION</div>
+                <div style={{ fontSize: 11, color: "rgba(255,255,255,.5)" }}>{geo.city}{geo.regionName ? `, ${geo.regionName}` : ""}</div>
+                {geo.lat && <div style={{ fontSize: 9, color: "rgba(255,255,255,.2)", marginTop: 2 }}>{geo.lat}°, {geo.lon}°</div>}
+              </div>}
+            </div>}
+
+            {/* RADAR */}
+            <div className={showTrace ? "np-c6" : "np-c12"} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+              <RadarSweep size={230} score={showScore ? scoreData?.value : null} active={phase === "running"} />
+              {showScore && verdicts && <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center", width: "100%", animation: "hudIn .5s ease .2s both" }}>
+                {Object.values(verdicts).map((v, k) => (
+                  <div key={k} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 3, background: v.ok ? "rgba(0,255,213,.03)" : "rgba(255,23,68,.03)", border: `1px solid ${v.ok ? "rgba(0,255,213,.1)" : "rgba(255,23,68,.1)"}`, flex: "1 1 110px", minWidth: 110 }}>
+                    <span style={{ fontSize: 18 }}>{v.icon}</span>
+                    <div><div style={{ fontSize: 10, fontWeight: 700, color: v.ok ? "#00ffd5" : "#ff1744", letterSpacing: 1 }}>{v.label}</div>
+                      <div style={{ fontSize: 9, color: "rgba(255,255,255,.3)" }}>{v.detail}</div></div>
+                  </div>
+                ))}
+              </div>}
+            </div>
+
+            {/* CF TRACE */}
+            {showTrace && trace && !trace._failed && <div className="np-c3">
+              <HudPanel title="CF TRACE" icon="☁️" status="done" accent="#f48118" delay={.1}>
+                <M l="Protocol" v={trace.http === "h3" ? "HTTP/3 QUIC" : trace.http === "h2" ? "HTTP/2" : trace.http || "?"} q={trace.http === "h3" ? "good" : "ok"} />
+                <M l="TLS" v={trace.tls || "?"} q={trace.tls?.includes("1.3") ? "good" : "ok"} />
+                <M l="KEX" v={trace.kex || "?"} q={trace.kex?.includes("MLKEM") ? "good" : "ok"} />
+                <M l="SNI" v={trace.sni === "plaintext" ? "Plaintext ⚠" : trace.sni || "?"} q={trace.sni === "plaintext" ? "warn" : "good"} />
+                <M l="WARP" v={trace.warp || "off"} q={trace.warp === "on" || trace.warp === "plus" ? "good" : "ok"} />
+                <M l="Trace RTT" v={trace._ms} u="ms" q={trace._ms < 50 ? "good" : "ok"} />
+              </HudPanel>
+            </div>}
+
+            {/* LATENCY */}
+            {(latProg.length > 0 || showLatency) && <div className="np-c6">
+              <HudPanel title="LATENCY OSCILLOSCOPE" icon="◎" status={showLatency ? "done" : "active"} accent="#00ffd5" glow={showLatency} delay={.15}>
+                <Oscilloscope data={showLatency && latencyData?.raw ? latencyData.raw : latProg} color="#00ffd5" height={60}
+                  label={showLatency ? `${latencyData?.raw?.length || 0} SAMPLES` : `SAMPLING ${latProg.length}/24`}
+                  active={!showLatency} />
+                {showLatency && latencyData && !latencyData._failed && <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, marginTop: 10 }}>
+                  {[{ v: latencyData.avg, l: "AVG ms", c: "#00ffd5" }, { v: latencyData.jitter, l: "JITTER ms", c: "#c6ff00" }, { v: latencyData.p90, l: "P90 ms", c: "#00b4d8" }].map(s => (
+                    <div key={s.l} style={{ textAlign: "center" }}>
+                      <div style={{ fontSize: 22, fontWeight: 900, fontFamily: "var(--ff-display)", color: s.c, textShadow: `0 0 10px ${s.c}25` }}>{s.v}</div>
+                      <div style={{ fontSize: 8, color: "rgba(255,255,255,.2)", letterSpacing: 2 }}>{s.l}</div>
+                    </div>
+                  ))}
+                </div>}
+              </HudPanel>
+            </div>}
+
+            {/* SPEED */}
+            {(showDl || showUl || phaseIdx === 4 || phaseIdx === 5) && <div className="np-c6">
+              <HudPanel title="BANDWIDTH" icon="⚡" status={showUl ? "done" : "active"} accent="#7c4dff" glow={showDl && showUl} delay={.2}>
+                <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <SpeedGauge value={showDl ? dlData?.mbps : null} max={500} label="DOWNLOAD" unit="Mbps" color="#00ffd5" size={132} />
+                  <SpeedGauge value={showUl ? ulData?.mbps : null} max={200} label="UPLOAD" unit="Mbps" color="#7c4dff" size={132} />
+                </div>
+                {showDl && showUl && <div style={{ display: "flex", justifyContent: "center", gap: 20, marginTop: 8 }}>
+                  <div style={{ fontSize: 9, color: "rgba(255,255,255,.25)" }}>P90↓ {dlData?.p90} Mbps</div>
+                  <div style={{ fontSize: 9, color: "rgba(255,255,255,.25)" }}>P90↑ {ulData?.p90} Mbps</div>
+                </div>}
+              </HudPanel>
+            </div>}
+
+            {/* DNS + SECURITY + CONNECTION */}
+            {showDns && <>{[
+              {
+                t: "DNS", i: "🔗", a: "#c6ff00", c: <>
+                  {dnsData?.domains && Object.entries(dnsData.domains).map(([d, v]) =>
+                    <M key={d} l={d} v={v ?? "—"} u="ms" q={v != null ? (v < 30 ? "good" : v < 80 ? "ok" : "warn") : null} s />
+                  )}
+                  <M l="Average" v={dnsData?.avg ?? "—"} u="ms" q={dnsData?.avg != null ? (dnsData.avg < 30 ? "good" : "ok") : null} />
+                </>
+              },
+              {
+                t: "SECURITY", i: "🔐", a: "#ffd600", c: <>
+                  <M l="TLS" v={trace?.tls || "?"} q={trace?.tls?.includes("1.3") ? "good" : "ok"} s />
+                  <M l="Post-Quantum" v={trace?.kex?.includes("MLKEM") ? "ML-KEM ✦" : "No"} q={trace?.kex?.includes("MLKEM") ? "good" : "ok"} s />
+                  <M l="QUIC/H3" v={trace?.http === "h3" ? "Active" : "No"} q={trace?.http === "h3" ? "good" : "ok"} s />
+                  <M l="ECH/SNI" v={trace?.sni === "plaintext" ? "Plain" : trace?.sni || "?"} q={trace?.sni === "plaintext" ? "warn" : "good"} s />
+                </>
+              },
+              {
+                t: "CONNECTION", i: "📡", a: "#00e676", c: <>
+                  <M l="Type" v={(() => { const ni = readNetworkInfo(); return ni._unsupported ? "N/A" : ni.type || "?"; })()} s />
+                  <M l="Proxy" v={geo?.proxy ? "Yes ⚠" : "None ✓"} q={geo?.proxy ? "warn" : "good"} s />
+                  <M l="Network" v={geo?.hosting ? "Hosting" : "Residential"} q={geo?.hosting ? "warn" : "good"} s />
+                  <M l="Timezone" v={geo?.timezone || "?"} s />
+                </>
+              },
+            ].map((p, idx) => (
+              <div key={p.t} className="np-c4">
+                <HudPanel title={p.t} icon={p.i} status="done" accent={p.a} delay={.25 + idx * .04}>{p.c}</HudPanel>
+              </div>
+            ))}</>}
+
+            {/* TARGETS */}
+            {(Object.keys(targetsDone).length > 0 || scanTarget) && <div className="np-c12">
+              <HudPanel title="INTERNATIONAL TARGETS" icon="🌐" status={scanTarget ? "active" : "done"} accent="#00b4d8" glow={!scanTarget && Object.keys(targetsDone).length > 0} delay={.3}>
+                <TargetGrid targets={targetsDone} activeId={scanTarget} />
+                {!scanTarget && Object.keys(targetsDone).length > 0 && <div style={{ display: "flex", gap: 20, marginTop: 12, paddingTop: 10, borderTop: "1px solid rgba(255,255,255,.03)", justifyContent: "center", flexWrap: "wrap" }}>
+                  {(() => {
+                    const vals = Object.values(targetsDone).filter(t => t.avg > 0);
+                    const reachable = vals.length;
+                    const avgLat = reachable > 0 ? Math.round(vals.reduce((a, t) => a + t.avg, 0) / reachable) : 0;
+                    const totalLoss = reachable > 0 ? Math.round(vals.reduce((a, t) => a + (t.loss || 0), 0) / reachable) : 0;
+                    return [
+                      { l: "REACHABLE", v: `${reachable}/${TARGETS.length}`, c: "#00ffd5" },
+                      { l: "AVG LATENCY", v: `${avgLat}ms`, c: "#00b4d8" },
+                      { l: "AVG LOSS", v: `${totalLoss}%`, c: "#00e676" },
+                    ];
+                  })().map(s => (
+                    <div key={s.l} style={{ textAlign: "center" }}><div style={{ fontSize: 8, color: "rgba(255,255,255,.2)", letterSpacing: 2, marginBottom: 2 }}>{s.l}</div><div style={{ fontSize: 18, fontWeight: 800, color: s.c, fontFamily: "var(--ff-display)", textShadow: `0 0 10px ${s.c}25` }}>{s.v}</div></div>
+                  ))}
+                </div>}
+              </HudPanel>
+            </div>}
+
+            {/* ANALYSIS */}
+            {showAnalysis && findings && <div className="np-c12">
+              <HudPanel title="CROSS-ANALYSIS" icon="🔬" accent={g.c} glow delay={.35}>
+                <div className="np-findings">
+                  {findings.map((f, i) => (
+                    <FindingCard key={f.id} icon={f.icon} title={f.title} desc={f.desc} severity={f.severity} delay={.1 + i * .05} />
+                  ))}
+                </div>
+              </HudPanel>
+            </div>}
+
+            {/* CONSOLE */}
+            {logs.length > 0 && <div className="np-c12">
+              <HudPanel title="SYSTEM CONSOLE" icon="⌘" status={phase === "done" ? "done" : "active"} accent="#00b4d8" delay={.4}>
+                <div style={{ maxHeight: 160, overflow: "auto", fontSize: 10, lineHeight: 2, fontFamily: "var(--ff-mono)" }}>
+                  {logs.map((l, i) => (
+                    <div key={i} style={{ color: l.level === "ok" ? "rgba(0,230,118,.55)" : l.level === "sys" ? "rgba(0,180,216,.45)" : l.level === "warn" ? "rgba(255,214,0,.55)" : "rgba(255,255,255,.25)", borderBottom: "1px solid rgba(255,255,255,.015)", padding: "1px 0" }}>
+                      <span style={{ color: "rgba(255,255,255,.1)", marginRight: 8, fontFamily: "var(--ff-display)", fontSize: 8 }}>{new Date(l.t).toLocaleTimeString("en", { hour12: false })}</span>{l.msg}
+                    </div>
+                  ))}
+                </div>
+              </HudPanel>
+            </div>}
+          </div>
+        )}
+
+        {/* IDLE */}
+        {phase === "idle" && <div style={{ textAlign: "center", padding: "70px 20px", animation: "hudIn .5s ease both" }}>
+          <div style={{ fontSize: 50, marginBottom: 12, filter: "drop-shadow(0 0 15px rgba(0,255,213,.08))" }}>◎</div>
+          <div style={{ fontSize: 12, fontFamily: "var(--ff-display)", color: "rgba(0,255,213,.3)", letterSpacing: 8, marginBottom: 8 }}>SYSTEMS NOMINAL</div>
+          <div style={{ fontSize: 12, color: "rgba(255,255,255,.2)", letterSpacing: 1, maxWidth: 440, margin: "0 auto", lineHeight: 2 }}>
+            10 measurement engines • 12 analysis patterns • Cloudflare Edge Network
+          </div>
+        </div>}
+
+        <footer style={{ textAlign: "center", marginTop: 32, paddingTop: 12, borderTop: "1px solid rgba(255,255,255,.015)" }}>
+          <div style={{ fontSize: 9, color: "rgba(255,255,255,.1)", letterSpacing: 4, fontFamily: "var(--ff-display)" }}>NETPROBE COMMAND CENTER • v4.0</div>
+        </footer>
+      </div>
+    </div>
+  );
+}

@@ -1,9 +1,9 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import NetDiag from "./LanProbeTest.jsx";
+import App from "./App.jsx";
 
 createRoot(document.getElementById("root")).render(
   <StrictMode>
-    <NetDiag />
+    <App />
   </StrictMode>
 );
