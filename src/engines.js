@@ -494,6 +494,7 @@ export async function probeInternationalTargets(onTargetDone, targetList) {
       loss: +(((PROBES - valid.length) / PROBES) * 100).toFixed(0),
       min: valid.length ? +Math.min(...valid).toFixed(0) : null,
       max: valid.length ? +Math.max(...valid).toFixed(0) : null,
+      favicon: target.url.split("?")[0],
     };
     onTargetDone?.(target.id, results[target.id]);
   }

@@ -264,7 +264,8 @@ function TargetGrid({ targets, activeId, groups }) {
               {isA && <div className="np-tg-glow" style={{ "--glow-color": group.accent }} />}
               {r && !isA && <div className="np-tg-done-glow" style={{ "--done-color": lc }} />}
               <div style={{ display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 2 }}>
-                <span style={{ fontSize: 16, filter: isA ? "brightness(1.4)" : r ? "none" : "grayscale(1) opacity(.3)" }}>{t.icon}</span>
+                {r?.favicon ? <img src={r.favicon} alt="" width="18" height="18" style={{ borderRadius: 3, objectFit: "contain", filter: isA ? "brightness(1.3)" : "none", flexShrink: 0 }} onError={e => { e.target.style.display = "none"; e.target.nextSibling.style.display = ""; }} />: null}
+                <span style={{ fontSize: 16, filter: isA ? "brightness(1.4)" : r ? "none" : "grayscale(1) opacity(.3)", display: r?.favicon ? "none" : "", flexShrink: 0 }}>{t.icon}</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 10, fontWeight: 700, color: r ? "rgba(255,255,255,.75)" : "rgba(255,255,255,.18)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.name}</div>
                   {r && qLabel && <div style={{ fontSize: 7, fontWeight: 600, color: lc, letterSpacing: 1 }}>{qLabel}</div>}
