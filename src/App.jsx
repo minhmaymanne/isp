@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { TARGETS, TARGET_GROUPS, SCAN_SCOPES, CONN_TYPES, COLO_MAP, PHASES, BOOT_LINES, detectISP, vietnamizeCity, countryFlag, countryNameVI } from "./data.js";
 import {
   fetchCFTrace, fetchGeoIP, measureLatency,
-  measureDownload, measureUpload, probeWAN,
+  measureDownload, measureUpload, measureLoadedLatency, probeWAN,
   probeDNS, readNetworkInfo, readResourceTiming,
   probeInternationalTargets, scanGateways, probeGateway,
   bufferBloatTest, mean,
@@ -420,6 +420,7 @@ export default function App() {
   const [latProg, setLatProg] = useState([]);
   const [dlData, setDlData] = useState(null);
   const [ulData, setUlData] = useState(null);
+  const [loadedLat, setLoadedLat] = useState(null);
   const [dnsData, setDnsData] = useState(null);
   const [targetsDone, setTargetsDone] = useState({});
   const [scanTarget, setScanTarget] = useState(null);
@@ -484,7 +485,7 @@ export default function App() {
     // Reset all
     setPhase("booting"); setPhaseIdx(0); setElapsed(0); setBooted(false);
     setTrace(null); setGeo(null); setIspInfo(null); setColoInfo(null);
-    setLatencyData(null); setLatProg([]); setDlData(null); setUlData(null);
+    setLatencyData(null); setLatProg([]); setDlData(null); setUlData(null); setLoadedLat(null);
     setDnsData(null); setTargetsDone({}); setScanTarget(null);
     setGwData(null); setBloatData(null);
     setFindings(null); setScoreData(null); setVerdicts(null);
@@ -552,6 +553,12 @@ export default function App() {
     });
     collected.upload = ulRes; setUlData(ulRes); setShowUl(true);
     addLog(`Upload: ${ulRes.mbps} Mbps (P90: ${ulRes.p90}, ${ulRes.samples} samples)`, "ok");
+
+    // Loaded latency (jitter under load)
+    addLog("Measuring loaded latency & jitter...", "net");
+    const llRes = await measureLoadedLatency();
+    collected.loadedLatency = llRes; setLoadedLat(llRes);
+    addLog(`Loaded latency: ${llRes.avg}ms, jitter: ${llRes.jitter}ms, loss: ${llRes.loss}%`, "ok");
 
     // ═══ Phase 3: DNS ═══
     setPhaseIdx(3); setScanProgress(55); addLog("DNS resolution timing...", "net");
@@ -776,10 +783,30 @@ export default function App() {
                   <SpeedGauge value={showDl ? dlData?.p90 : null} max={(() => { const v = dlData?.p90 || 0; return v > 2000 ? 10000 : v > 500 ? 5000 : v > 200 ? 1000 : v > 100 ? 500 : 200; })()} label="DOWNLOAD" unit="Mbps" color="#00ffd5" size={132} />
                   <SpeedGauge value={showUl ? ulData?.p90 : null} max={(() => { const v = ulData?.p90 || 0; return v > 1000 ? 5000 : v > 200 ? 2000 : v > 100 ? 500 : v > 50 ? 200 : 100; })()} label="UPLOAD" unit="Mbps" color="#7c4dff" size={132} />
                 </div>
-                {showDl && showUl && <div style={{ display: "flex", justifyContent: "center", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
-                  <span className="np-badge" style={{ background: "rgba(0,255,213,.08)", color: "#00ffd5", borderColor: "rgba(0,255,213,.15)" }}>AVG↓ {dlData?.mbps} Mbps</span>
-                  <span className="np-badge" style={{ background: "rgba(124,77,255,.08)", color: "#b388ff", borderColor: "rgba(124,77,255,.15)" }}>AVG↑ {ulData?.mbps} Mbps</span>
-                </div>}
+                {showDl && showUl && <>
+                  <div style={{ display: "flex", justifyContent: "center", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
+                    <span className="np-badge" style={{ background: "rgba(0,255,213,.08)", color: "#00ffd5", borderColor: "rgba(0,255,213,.15)" }}>AVG↓ {dlData?.mbps} Mbps</span>
+                    <span className="np-badge" style={{ background: "rgba(124,77,255,.08)", color: "#b388ff", borderColor: "rgba(124,77,255,.15)" }}>AVG↑ {ulData?.mbps} Mbps</span>
+                  </div>
+                  {coloInfo && <div style={{ textAlign: "center", marginTop: 10, padding: "6px 0", borderTop: "1px solid rgba(255,255,255,.06)" }}>
+                    <div style={{ fontSize: 9, color: "rgba(255,255,255,.3)", letterSpacing: 2, marginBottom: 4 }}>SERVER</div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: coloInfo.vn ? "#00e676" : coloInfo.nearby ? "#c6ff00" : "#ffd600" }}>
+                      {coloInfo.flag} {trace?.colo} — {coloInfo.city}
+                    </div>
+                  </div>}
+                  {loadedLat && <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, marginTop: 8 }}>
+                    {[
+                      { v: loadedLat.jitter, l: "JITTER", u: "ms", c: loadedLat.jitter < 5 ? "#00e676" : loadedLat.jitter < 15 ? "#c6ff00" : "#ff5252" },
+                      { v: loadedLat.avg, l: "LOADED LAT", u: "ms", c: loadedLat.avg < 50 ? "#00ffd5" : loadedLat.avg < 100 ? "#ffd600" : "#ff5252" },
+                      { v: loadedLat.loss, l: "PACKET LOSS", u: "%", c: loadedLat.loss === 0 ? "#00e676" : loadedLat.loss < 2 ? "#ffd600" : "#ff5252" },
+                    ].map(s => (
+                      <div key={s.l} style={{ textAlign: "center" }}>
+                        <div style={{ fontSize: 18, fontWeight: 700, color: s.c, fontFamily: "var(--font-mono, monospace)" }}>{s.v}<span style={{ fontSize: 9, opacity: .6 }}>{s.u}</span></div>
+                        <div style={{ fontSize: 8, color: "rgba(255,255,255,.25)", letterSpacing: 2 }}>{s.l}</div>
+                      </div>
+                    ))}
+                  </div>}
+                </>}
               </HudPanel>
             </div>}
 

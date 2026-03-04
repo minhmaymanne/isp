@@ -320,10 +320,12 @@ export async function measureLatency(onSample) {
 // ═══════════════════════════════════════════════════════════════════════
 export async function measureDownload(onProgress) {
   const samples = [];
+  let totalAttempts = 0, failedAttempts = 0;
   for (let si = 0; si < DL_SIZES.length; si++) {
     const size = DL_SIZES[si];
     const iterations = size <= 500000 ? 3 : 2;
     for (let i = 0; i < iterations; i++) {
+      totalAttempts++;
       try {
         const t0 = performance.now();
         const res = await fetch(
@@ -336,7 +338,7 @@ export async function measureDownload(onProgress) {
           const mbps = (buf.byteLength * 8) / (elapsed / 1000) / 1e6;
           samples.push(mbps);
         }
-      } catch {}
+      } catch { failedAttempts++; }
     }
     onProgress?.({
       phase: "download",
@@ -344,15 +346,17 @@ export async function measureDownload(onProgress) {
       currentSamples: samples.length,
     });
   }
-  return calculateSpeedResult(samples);
+  return calculateSpeedResult(samples, totalAttempts, failedAttempts);
 }
 
 export async function measureUpload(onProgress) {
   const samples = [];
+  let totalAttempts = 0, failedAttempts = 0;
   for (let si = 0; si < UL_SIZES.length; si++) {
     const size = UL_SIZES[si];
     const iterations = size <= 500000 ? 3 : 2;
     for (let i = 0; i < iterations; i++) {
+      totalAttempts++;
       try {
         const blob = new Blob([new ArrayBuffer(size)]);
         const t0 = performance.now();
@@ -365,7 +369,7 @@ export async function measureUpload(onProgress) {
           const mbps = (size * 8) / (elapsed / 1000) / 1e6;
           samples.push(mbps);
         }
-      } catch {}
+      } catch { failedAttempts++; }
     }
     onProgress?.({
       phase: "upload",
@@ -373,19 +377,42 @@ export async function measureUpload(onProgress) {
       currentSamples: samples.length,
     });
   }
-  return calculateSpeedResult(samples);
+  return calculateSpeedResult(samples, totalAttempts, failedAttempts);
 }
 
-function calculateSpeedResult(samples) {
-  if (!samples.length) return { mbps: 0, p90: 0, samples: 0 };
-  samples.sort((a, b) => a - b);
-  const p90idx = Math.floor(samples.length * 0.9);
-  const topHalf = samples.slice(Math.floor(samples.length / 2));
+export async function measureLoadedLatency() {
+  const pings = [];
+  for (let i = 0; i < 20; i++) {
+    try {
+      const t0 = performance.now();
+      await fetch("https://speed.cloudflare.com/__down?bytes=0", {
+        cache: "no-store", signal: AbortSignal.timeout(5000),
+      });
+      pings.push(performance.now() - t0);
+    } catch {}
+  }
+  if (!pings.length) return { avg: 0, jitter: 0, loss: 0 };
+  const sorted = [...pings].sort((a, b) => a - b);
+  const trimmed = sorted.length > 4 ? sorted.slice(1, -1) : sorted;
+  return {
+    avg: +mean(trimmed).toFixed(1),
+    jitter: +jitterCalc(trimmed).toFixed(1),
+    loss: +((1 - pings.length / 20) * 100).toFixed(1),
+  };
+}
+
+function calculateSpeedResult(samples, totalAttempts = 0, failedAttempts = 0) {
+  if (!samples.length) return { mbps: 0, p90: 0, samples: 0, loss: 0, jitter: 0 };
+  const sorted = [...samples].sort((a, b) => a - b);
+  const p90idx = Math.floor(sorted.length * 0.9);
+  const topHalf = sorted.slice(Math.floor(sorted.length / 2));
   const avg = topHalf.reduce((a, b) => a + b, 0) / topHalf.length;
   return {
     mbps: +avg.toFixed(1),
-    p90: +(samples[p90idx] || avg).toFixed(1),
-    samples: samples.length,
+    p90: +(sorted[p90idx] || avg).toFixed(1),
+    samples: sorted.length,
+    loss: totalAttempts ? +((failedAttempts / totalAttempts) * 100).toFixed(1) : 0,
+    jitter: +jitterCalc(sorted).toFixed(1),
   };
 }
 
