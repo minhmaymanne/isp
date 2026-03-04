@@ -226,12 +226,12 @@ function HudPanel({ children, title, icon, status, accent = "#00b4d8", delay = 0
 
 function M({ l, v, u, q, s }) {
   const c = q === "good" ? "#00ffd5" : q === "ok" ? "#c6ff00" : q === "warn" ? "#ffd600" : q === "bad" ? "#ff1744" : null;
-  return (<div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", padding: `${s ? 3 : 5}px 0`, borderBottom: "1px solid rgba(255,255,255,.03)" }}>
-    <span style={{ fontSize: s ? 9 : 11, color: "rgba(255,255,255,.45)", fontWeight: 500 }}>{l}</span>
+  return (<div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", padding: `${s ? 4 : 6}px 0`, borderBottom: "1px solid rgba(255,255,255,.04)" }}>
+    <span style={{ fontSize: s ? 10 : 11, color: "rgba(255,255,255,.55)", fontWeight: 500 }}>{l}</span>
     <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-      <span style={{ fontSize: s ? 12 : 14, fontWeight: 700, color: "#f0f8ff", fontFamily: "var(--ff-display)" }}>{v ?? "—"}</span>
-      {u && <span style={{ fontSize: 8, color: "rgba(255,255,255,.25)" }}>{u}</span>}
-      {c && <span style={{ width: 5, height: 5, borderRadius: "50%", background: c, boxShadow: `0 0 5px ${c}`, display: "inline-block" }} />}
+      <span style={{ fontSize: s ? 12 : 14, fontWeight: 700, color: c || "#f0f8ff", fontFamily: "var(--ff-display)", textShadow: c ? `0 0 6px ${c}30` : "none" }}>{v ?? "—"}</span>
+      {u && <span style={{ fontSize: 9, color: "rgba(255,255,255,.35)" }}>{u}</span>}
+      {c && <span style={{ width: 6, height: 6, borderRadius: "50%", background: c, boxShadow: `0 0 6px ${c}`, display: "inline-block" }} />}
     </div>
   </div>);
 }
@@ -288,8 +288,9 @@ function TargetGrid({ targets, activeId, groups }) {
 //  PRE-SCAN MODAL — Connection type + Scan scope selector
 // ═══════════════════════════════════════════════════════════════════════
 function PreScanModal({ onConfirm, onCancel }) {
-  const [conn, setConn] = useState("wifi");
-  const [scope, setScope] = useState("full");
+  const saved = (() => { try { return JSON.parse(localStorage.getItem("np_prefs") || "null"); } catch { return null; } })();
+  const [conn, setConn] = useState(saved?.conn || "wifi");
+  const [scope, setScope] = useState(saved?.scope || "full");
   return (<div className="np-modal-overlay" onClick={onCancel}>
     <div className="np-modal" onClick={e => e.stopPropagation()}>
       {/* Header */}
@@ -365,16 +366,23 @@ function FindingCard({ icon, title, desc, severity, delay = 0 }) {
   </div>);
 }
 
-function PhaseTimeline({ phases, currentIdx }) {
-  return (<div style={{ display: "flex", alignItems: "center", gap: 0, overflow: "hidden", padding: "0 2px" }}>
+function PhaseTimeline({ phases, currentIdx, progress }) {
+  return (<div className="np-phase-bar">
     {phases.map((p, i) => {
       const done = i < currentIdx, act = i === currentIdx;
-      const c = done ? "#00ffd5" : act ? "#00b4d8" : "rgba(255,255,255,.04)";
-      return (<div key={p.id} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
-        <div style={{ width: "100%", height: 2, background: done ? c : act ? `linear-gradient(90deg,${c},transparent)` : "rgba(255,255,255,.02)", borderRadius: 1, transition: "all .5s", boxShadow: act ? `0 0 6px ${c}35` : "none" }} />
-        <div style={{ fontSize: 7, color: done || act ? c : "rgba(255,255,255,.06)", letterSpacing: 1, textAlign: "center", fontFamily: "var(--ff-display)", whiteSpace: "nowrap" }}>{p.name}</div>
+      const c = done ? "#00ffd5" : act ? "#00b4d8" : "rgba(255,255,255,.06)";
+      return (<div key={p.id} className={`np-phase-item${act ? " np-phase-active" : ""}${done ? " np-phase-done" : ""}`}>
+        <div className="np-phase-dot" style={{ background: done ? "#00ffd5" : act ? "#00b4d8" : "rgba(255,255,255,.06)", boxShadow: act ? "0 0 10px #00b4d8, 0 0 20px rgba(0,180,216,.3)" : done ? "0 0 6px rgba(0,255,213,.3)" : "none" }}>
+          {done ? "✓" : p.icon}
+        </div>
+        <span className="np-phase-label" style={{ color: c }}>{p.name}</span>
+        {act && <div className="np-phase-glow" />}
       </div>);
     })}
+    {/* Progress bar */}
+    <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 2, background: "rgba(255,255,255,.02)", borderRadius: 1 }}>
+      <div style={{ height: "100%", width: `${progress || 0}%`, background: "linear-gradient(90deg, #00ffd5, #00b4d8)", borderRadius: 1, transition: "width .5s ease", boxShadow: "0 0 8px rgba(0,255,213,.3)" }} />
+    </div>
   </div>);
 }
 
@@ -435,6 +443,7 @@ export default function App() {
   const [connType, setConnType] = useState(null);
   const [scanScope, setScanScope] = useState(null);
   const [activeGroups, setActiveGroups] = useState(TARGET_GROUPS);
+  const [scanProgress, setScanProgress] = useState(0);
 
   const timerRef = useRef(null);
   const addLog = useCallback((msg, level = "info") => setLogs(p => [...p, { t: Date.now(), msg, level }].slice(-60)), []);
@@ -445,11 +454,25 @@ export default function App() {
     return () => clearInterval(timerRef.current);
   }, [phase]);
 
-  const handleEngage = useCallback(() => setShowPreScan(true), []);
+  const handleEngage = useCallback(() => {
+    // If we have saved prefs, start directly without modal
+    try {
+      const saved = JSON.parse(localStorage.getItem("np_prefs") || "null");
+      if (saved?.conn && saved?.scope) {
+        const scopeDef = SCAN_SCOPES.find(s => s.id === saved.scope);
+        const groups = scopeDef?.groups ? TARGET_GROUPS.filter(g => scopeDef.groups.includes(g.id)) : TARGET_GROUPS;
+        setConnType(saved.conn); setScanScope(saved.scope); setActiveGroups(groups);
+        run(saved.conn, groups);
+        return;
+      }
+    } catch {}
+    setShowPreScan(true);
+  }, []);
+  const handleOpenSettings = useCallback(() => setShowPreScan(true), []);
   const handlePreScanConfirm = useCallback((conn, scopeId) => {
     setShowPreScan(false);
-    setConnType(conn);
-    setScanScope(scopeId);
+    try { localStorage.setItem("np_prefs", JSON.stringify({ conn, scope: scopeId })); } catch {}
+    setConnType(conn); setScanScope(scopeId);
     const scopeDef = SCAN_SCOPES.find(s => s.id === scopeId);
     const groups = scopeDef?.groups ? TARGET_GROUPS.filter(g => scopeDef.groups.includes(g.id)) : TARGET_GROUPS;
     setActiveGroups(groups);
@@ -471,11 +494,12 @@ export default function App() {
     addLog("Initiating boot sequence...", "sys");
     const connLabel = CONN_TYPES.find(c => c.id === conn)?.label || conn;
     addLog(`Kết nối: ${connLabel} • Targets: ${scopeTargets.length} apps`, "sys");
+    setScanProgress(0);
     await sleep(2200); setBooted(true); setPhase("running");
     const collected = {};
 
-    // ═══ Phase 1: CF Trace ═══
-    setPhaseIdx(1); addLog("Acquiring Cloudflare edge trace...", "net");
+    // ═══ Phase 1: CF Trace + GeoIP ═══
+    setPhaseIdx(1); setScanProgress(5); addLog("Acquiring Cloudflare edge trace...", "net");
     const traceRes = await fetchCFTrace();
     collected.trace = traceRes; setTrace(traceRes);
     if (!traceRes._failed) {
@@ -488,8 +512,8 @@ export default function App() {
       addLog("CF Trace failed — using fallback data", "warn");
     }
 
-    // ═══ Phase 2: GeoIP ═══
-    setPhaseIdx(2); addLog("Resolving geolocation...", "net");
+    // GeoIP (still phase 1 - NHẬN DIỆN)
+    setScanProgress(10); addLog("Resolving geolocation...", "net");
     const geoRes = await fetchGeoIP(traceRes);
     collected.geo = geoRes; setGeo(geoRes);
     if (!geoRes._failed) {
@@ -503,8 +527,8 @@ export default function App() {
       addLog("GeoIP: tất cả API đều thất bại", "warn");
     }
 
-    // ═══ Phase 3: Latency ═══
-    setPhaseIdx(3); addLog("Latency oscilloscope — 24 samples...", "net");
+    // ═══ Phase 2: Tốc độ (Latency + DL + UL) ═══
+    setPhaseIdx(2); setScanProgress(18); addLog("Latency oscilloscope — 24 samples...", "net");
     const latRes = await measureLatency((ms, i) => {
       if (ms != null) setLatProg(p => [...p, ms]);
     });
@@ -513,30 +537,30 @@ export default function App() {
       addLog(`Latency: avg=${latRes.avg}ms jitter=${latRes.jitter}ms p90=${latRes.p90}ms`, "ok");
     } else { addLog("Latency measurement failed", "warn"); }
 
-    // ═══ Phase 4: Download ═══
-    setPhaseIdx(4); addLog("Download bandwidth test...", "net");
+    // Download (still phase 2)
+    setScanProgress(30); addLog("Download bandwidth test...", "net");
     const dlRes = await measureDownload(p => {
       addLog(`Download sampling... ${Math.round(p.progress * 100)}%`, "net");
     });
     collected.download = dlRes; setDlData(dlRes); setShowDl(true);
     addLog(`Download: ${dlRes.mbps} Mbps (P90: ${dlRes.p90}, ${dlRes.samples} samples)`, "ok");
 
-    // ═══ Phase 5: Upload ═══
-    setPhaseIdx(5); addLog("Upload bandwidth test...", "net");
+    // Upload (still phase 2)
+    setScanProgress(45); addLog("Upload bandwidth test...", "net");
     const ulRes = await measureUpload(p => {
       addLog(`Upload sampling... ${Math.round(p.progress * 100)}%`, "net");
     });
     collected.upload = ulRes; setUlData(ulRes); setShowUl(true);
     addLog(`Upload: ${ulRes.mbps} Mbps (P90: ${ulRes.p90}, ${ulRes.samples} samples)`, "ok");
 
-    // ═══ Phase 6: DNS ═══
-    setPhaseIdx(6); addLog("DNS resolution timing...", "net");
+    // ═══ Phase 3: DNS ═══
+    setPhaseIdx(3); setScanProgress(55); addLog("DNS resolution timing...", "net");
     const dnsRes = await probeDNS();
     collected.dns = dnsRes; setDnsData(dnsRes); setShowDns(true);
     addLog(`DNS: avg ${dnsRes.avg}ms`, "ok");
 
-    // ═══ Phase 7: International Targets ═══
-    setPhaseIdx(7); addLog(`Scanning ${scopeTargets.length} targets...`, "net");
+    // ═══ Phase 4: ỨNG DỤNG ═══
+    setPhaseIdx(4); setScanProgress(60); addLog(`Scanning ${scopeTargets.length} targets...`, "net");
     const targetsRes = await probeInternationalTargets((id, result) => {
       setTargetsDone(p => ({ ...p, [id]: result }));
       setScanTarget(id);
@@ -546,8 +570,8 @@ export default function App() {
     collected.targets = targetsRes;
     setScanTarget(null);
 
-    // ═══ Phase 8: Gateway + Bloat (optional) ═══
-    addLog("Gateway probe (may skip on HTTPS)...", "net");
+    // Gateway + Bloat (optional)
+    setScanProgress(85); addLog("Gateway probe (may skip on HTTPS)...", "net");
     try {
       const gw = await scanGateways();
       if (gw) {
@@ -567,8 +591,8 @@ export default function App() {
       addLog("Gateway probe skipped", "warn");
     }
 
-    // ═══ Phase 9: Analysis ═══
-    setPhaseIdx(8); addLog("Cross-analysis engine — 12 rules...", "sys");
+    // ═══ Phase 5: PHÂN TÍCH ═══
+    setPhaseIdx(5); setScanProgress(90); addLog("Cross-analysis engine — 12 rules...", "sys");
     const analysisRes = crossAnalyze(collected);
     setFindings(analysisRes);
     addLog(`Analysis: ${analysisRes.length} findings`, "ok");
@@ -576,13 +600,14 @@ export default function App() {
     const verdictsRes = computeVerdicts(collected);
     setVerdicts(verdictsRes); setShowAnalysis(true);
 
-    // ═══ Phase 10: Score ═══
-    setPhaseIdx(9); addLog("Computing score...", "sys");
+    // Score (still phase 5)
+    setScanProgress(95); addLog("Computing score...", "sys");
     await sleep(300);
     const scoreRes = calculateScore(collected);
     collected.score = scoreRes;
     setScoreData(scoreRes); setShowScore(true);
     addLog(`Score: ${scoreRes.value}/100 — ${scoreRes.grade} (${scoreRes.label})`, "ok");
+    setScanProgress(100);
     addLog("═══ SCAN COMPLETE ═══", "sys");
     setPhase("done");
   }, [addLog]);
@@ -620,21 +645,30 @@ export default function App() {
         .np-tg-done-glow{position:absolute;inset:0;border-radius:6px;z-index:0;pointer-events:none;box-shadow:inset 0 0 12px color-mix(in srgb,var(--done-color) 8%,transparent),0 0 6px color-mix(in srgb,var(--done-color) 5%,transparent);opacity:0;animation:doneGlowIn .6s ease forwards}
         @keyframes doneGlowIn{to{opacity:1}}
         .np-tg-scanning{font-size:10px;animation:pulse .45s infinite;font-weight:900;letter-spacing:2px}
+        /* ── Phase Timeline Bar ── */
+        .np-phase-bar{display:flex;align-items:center;gap:4px;position:relative;padding:8px 4px 14px}
+        .np-phase-item{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;position:relative;z-index:1}
+        .np-phase-dot{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;transition:all .5s;color:rgba(255,255,255,.8)}
+        .np-phase-done .np-phase-dot{font-size:10px;color:#fff}
+        .np-phase-label{font-size:9px;letter-spacing:2px;font-family:var(--ff-display);font-weight:700;text-align:center;transition:all .5s}
+        .np-phase-active .np-phase-label{text-shadow:0 0 12px currentColor}
+        .np-phase-glow{position:absolute;top:-4px;width:34px;height:34px;border-radius:50%;background:rgba(0,180,216,.15);filter:blur(8px);animation:pulse 1.2s ease infinite;pointer-events:none}
+        @keyframes phaseGlow{0%,100%{box-shadow:0 0 8px rgba(0,180,216,.3)}50%{box-shadow:0 0 20px rgba(0,180,216,.6)}}
         .np-id-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
-        .np-id-card{padding:14px 16px;border-radius:4px;background:rgba(255,255,255,.015);border:1px solid rgba(255,255,255,.04);position:relative;transition:all .3s}
-        .np-id-card:hover{background:rgba(255,255,255,.025);border-color:rgba(0,255,213,.08)}
+        .np-id-card{padding:14px 16px;border-radius:4px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.05);position:relative;transition:all .3s}
+        .np-id-card:hover{background:rgba(255,255,255,.03);border-color:rgba(0,255,213,.1)}
         .np-id-icon{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px;margin-bottom:10px}
-        .np-id-label{font-size:9px;font-weight:700;color:rgba(255,255,255,.25);letter-spacing:3px;font-family:var(--ff-display);margin-bottom:6px}
+        .np-id-label{font-size:10px;font-weight:700;color:rgba(255,255,255,.45);letter-spacing:3px;font-family:var(--ff-display);margin-bottom:6px}
         .np-id-value{font-size:15px;font-weight:800;color:#f0f8ff;font-family:var(--ff-display);margin-bottom:4px;line-height:1.3}
-        .np-id-sub{font-size:10px;color:rgba(255,255,255,.3);line-height:1.6;margin-top:1px}
-        .np-id-desc{font-size:10px;color:rgba(255,255,255,.22);line-height:1.5;margin-top:6px;font-style:italic;border-top:1px solid rgba(255,255,255,.03);padding-top:6px}
-        .np-id-tag{font-size:8px;color:rgba(255,255,255,.12);margin-top:4px;letter-spacing:1px}
+        .np-id-sub{font-size:11px;color:rgba(255,255,255,.45);line-height:1.6;margin-top:2px}
+        .np-id-desc{font-size:10px;color:rgba(255,255,255,.35);line-height:1.5;margin-top:6px;font-style:italic;border-top:1px solid rgba(255,255,255,.04);padding-top:6px}
+        .np-id-tag{font-size:8px;padding:2px 6px;border-radius:3px;background:rgba(0,180,216,.1);color:rgba(0,180,216,.7);margin-top:5px;display:inline-block;letter-spacing:1px;border:1px solid rgba(0,180,216,.15)}
         .np-id-badges{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}
-        .np-badge{font-size:9px;padding:3px 8px;border-radius:3px;background:rgba(255,255,255,.04);color:rgba(255,255,255,.4);border:1px solid rgba(255,255,255,.06);font-family:var(--ff-display);letter-spacing:1px;white-space:nowrap}
+        .np-badge{font-size:9px;padding:3px 8px;border-radius:3px;background:rgba(0,180,216,.08);color:rgba(0,180,216,.7);border:1px solid rgba(0,180,216,.12);font-family:var(--ff-display);letter-spacing:1px;white-space:nowrap}
         .np-id-rows{display:flex;flex-direction:column;gap:0}
-        .np-id-row{display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.02);font-size:10px}
-        .np-id-row span:first-child{color:rgba(255,255,255,.35)}
-        .np-id-row span:last-child{color:rgba(255,255,255,.55);font-weight:600;text-align:right}
+        .np-id-row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.03);font-size:11px}
+        .np-id-row span:first-child{color:rgba(255,255,255,.5);font-weight:500}
+        .np-id-row span:last-child{color:rgba(255,255,255,.7);font-weight:600;text-align:right}
         /* ── Pre-scan Modal ── */
         .np-modal-overlay{position:fixed;inset:0;z-index:100;background:rgba(1,6,16,.85);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;animation:fadeIn .25s ease}
         @keyframes fadeIn{from{opacity:0}to{opacity:1}}
@@ -680,16 +714,22 @@ export default function App() {
             </h1>
             <div style={{ fontSize: 9, color: "rgba(255,255,255,.12)", letterSpacing: 2 }}>NETWORK OPERATIONS CENTER</div>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            {(phase === "running" || phase === "done") && <div style={{ fontSize: 18, fontFamily: "var(--ff-display)", color: phase === "done" ? g.c : "#00b4d8", fontWeight: 700, letterSpacing: 3, textShadow: `0 0 8px ${phase === "done" ? g.c : "#00b4d8"}25` }}>{fmtT(elapsed)}</div>}
-            {phase === "idle" ? <button onClick={handleEngage} style={{ background: "transparent", border: "1px solid rgba(0,255,213,.2)", borderRadius: 3, padding: "12px 32px", animation: "borderPulse 3s ease infinite" }}>
-              <span style={{ color: "#00ffd5", fontSize: 12, fontWeight: 700, fontFamily: "var(--ff-display)", letterSpacing: 6 }}>▶ ENGAGE</span>
-            </button> : phase === "done" ? <button onClick={handleEngage} style={{ background: "transparent", border: `1px solid ${g.c}25`, borderRadius: 3, padding: "8px 24px", color: g.c, fontSize: 10, fontFamily: "var(--ff-display)", letterSpacing: 4 }}>↻ RE-SCAN</button> : null}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexDirection: "column" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              {(phase === "running" || phase === "done") && <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                <div style={{ fontSize: 18, fontFamily: "var(--ff-display)", color: phase === "done" ? g.c : "#00b4d8", fontWeight: 700, letterSpacing: 3, textShadow: `0 0 8px ${phase === "done" ? g.c : "#00b4d8"}25` }}>{fmtT(elapsed)}</div>
+                {phase === "running" && <div style={{ fontSize: 14, fontFamily: "var(--ff-display)", color: "#00ffd5", fontWeight: 800, letterSpacing: 1, textShadow: "0 0 10px rgba(0,255,213,.3)" }}>{scanProgress}%</div>}
+              </div>}
+              {phase === "idle" ? <button onClick={handleEngage} style={{ background: "transparent", border: "1px solid rgba(0,255,213,.2)", borderRadius: 3, padding: "12px 32px", animation: "borderPulse 3s ease infinite" }}>
+                <span style={{ color: "#00ffd5", fontSize: 12, fontWeight: 700, fontFamily: "var(--ff-display)", letterSpacing: 6 }}>▶ ENGAGE</span>
+              </button> : phase === "done" ? <button onClick={handleEngage} style={{ background: "transparent", border: `1px solid ${g.c}25`, borderRadius: 3, padding: "8px 24px", color: g.c, fontSize: 10, fontFamily: "var(--ff-display)", letterSpacing: 4 }}>↻ RE-SCAN</button> : null}
+            </div>
+            {(phase === "idle" || phase === "done") && <button onClick={handleOpenSettings} style={{ background: "rgba(255,255,255,.03)", border: "1px solid rgba(255,255,255,.06)", borderRadius: 3, padding: "5px 14px", color: "rgba(255,255,255,.35)", fontSize: 9, fontFamily: "var(--ff-display)", letterSpacing: 2, cursor: "pointer", transition: "all .2s" }}>⚙ TÙY CHỌN</button>}
           </div>
         </header>
 
         {/* TIMELINE */}
-        {(phase === "running" || phase === "done") && phaseIdx >= 0 && <div style={{ marginBottom: 14, animation: "hudIn .3s ease both" }}><PhaseTimeline phases={PHASES} currentIdx={phase === "done" ? PHASES.length : phaseIdx} /></div>}
+        {(phase === "running" || phase === "done") && phaseIdx >= 0 && <div style={{ marginBottom: 14, animation: "hudIn .3s ease both" }}><PhaseTimeline phases={PHASES} currentIdx={phase === "done" ? PHASES.length : phaseIdx} progress={scanProgress} /></div>}
 
         {/* BOOT */}
         {phase === "booting" && !booted && <div style={{ maxWidth: 580, margin: "30px auto", animation: "hudIn .3s ease both" }}><BootTerminal lines={BOOT_LINES} /></div>}
@@ -706,7 +746,10 @@ export default function App() {
                     <div className="np-id-icon" style={{ background: "rgba(0,255,213,.08)" }}>🌐</div>
                     <div className="np-id-label">ĐỊA CHỈ IP</div>
                     <div className="np-id-value" style={{ color: "#00ffd5" }}>{trace?.ip || "—"}</div>
-                    <div className="np-id-sub">{geo?.ipType ? geo.ipType.toUpperCase() : "IPv4"} • {trace?.visit_scheme === "https" ? "🔒 HTTPS" : "HTTP"}</div>
+                    <div className="np-id-badges">
+                      <span className="np-badge" style={{ background: "rgba(0,255,213,.1)", color: "#00ffd5", borderColor: "rgba(0,255,213,.2)" }}>{geo?.ipType ? geo.ipType.toUpperCase() : "IPv4"}</span>
+                      <span className="np-badge" style={trace?.visit_scheme === "https" ? { background: "rgba(0,230,118,.1)", color: "#00e676", borderColor: "rgba(0,230,118,.2)" } : {}}>{trace?.visit_scheme === "https" ? "🔒 HTTPS" : "HTTP"}</span>
+                    </div>
                     {geo?._source && <div className="np-id-tag">via {geo._source}</div>}
                   </div>
 
@@ -717,14 +760,17 @@ export default function App() {
                     </div>
                     <div className="np-id-label">NHÀ MẠNG</div>
                     <div className="np-id-value" style={{ color: ispInfo?.color || "#f0f8ff" }}>{ispInfo?.name || geo?.isp || "—"}</div>
-                    {ispInfo?.fullName && <div className="np-id-sub" style={{ color: "rgba(255,255,255,.35)" }}>{ispInfo.fullName}</div>}
-                    <div className="np-id-sub">{geo?.as || geo?._asRaw || ""}{geo?.asname && geo.asname !== (geo?.isp || "") ? ` • ${geo.asname}` : ""}</div>
+                    {ispInfo?.fullName && <div className="np-id-sub">{ispInfo.fullName}</div>}
+                    {(geo?.as || geo?._asRaw) && <div className="np-id-badges" style={{ marginTop: 4 }}>
+                      <span className="np-badge" style={{ background: `${ispInfo?.color || "#666"}15`, color: `${ispInfo?.color || "#aaa"}`, borderColor: `${ispInfo?.color || "#666"}25` }}>{geo?.as || geo?._asRaw}</span>
+                      {geo?.asname && geo.asname !== (geo?.isp || "") && <span className="np-badge">{geo.asname}</span>}
+                    </div>}
                     {ispInfo?.tier > 0 && <div className="np-id-badges">
                       <span className="np-badge" style={{ background: `${ispInfo.color}20`, color: ispInfo.color, borderColor: `${ispInfo.color}30` }}>Tier {ispInfo.tier}</span>
                       {ispInfo.type && <span className="np-badge">{ispInfo.type}</span>}
                     </div>}
                     {ispInfo?.desc && <div className="np-id-desc">{ispInfo.desc}</div>}
-                    {geo?.org && geo.org !== (geo?.isp || "") && <div className="np-id-sub" style={{ marginTop: 2 }}>Tổ chức: {geo.org}</div>}
+                    {geo?.org && geo.org !== (geo?.isp || "") && <div className="np-id-sub">Tổ chức: <strong style={{ color: "rgba(255,255,255,.6)" }}>{geo.org}</strong></div>}
                   </div>
 
                   {/* ── Vị trí ── */}
@@ -739,11 +785,11 @@ export default function App() {
                     {geo?.regionName && geo.regionName !== geo?.city && <div className="np-id-sub">
                       {vietnamizeCity(geo.regionName) || geo.regionName}{geo?.regionCode ? ` (${geo.regionCode})` : ""}
                     </div>}
-                    <div className="np-id-sub" style={{ color: "rgba(255,255,255,.4)" }}>
-                      {countryNameVI(geo?.countryCode) || geo?.country || "—"} {geo?.countryCode ? countryFlag(geo.countryCode) : ""}
+                    <div className="np-id-badges" style={{ marginTop: 4 }}>
+                      <span className="np-badge" style={{ background: "rgba(0,230,118,.1)", color: "#00e676", borderColor: "rgba(0,230,118,.2)" }}>{geo?.countryCode ? countryFlag(geo.countryCode) : "🌐"} {countryNameVI(geo?.countryCode) || geo?.country || "—"}</span>
                     </div>
-                    {geo?.lat != null && <div className="np-id-sub">{Number(geo.lat).toFixed(4)}°N, {Number(geo.lon).toFixed(4)}°E</div>}
-                    {geo?.zip && <div className="np-id-sub">Mã vùng: {geo.zip}</div>}
+                    {geo?.lat != null && <div className="np-id-sub" style={{ fontSize: 10 }}>{Number(geo.lat).toFixed(4)}°N, {Number(geo.lon).toFixed(4)}°E</div>}
+                    {geo?.zip && <div className="np-id-sub" style={{ fontSize: 10 }}>Mã vùng: {geo.zip}</div>}
                     {geo?.timezone && <div className="np-id-badges">
                       <span className="np-badge">🕐 {geo.timezone}{geo?.utcOffset ? ` (${geo.utcOffset})` : ""}</span>
                     </div>}
@@ -803,7 +849,7 @@ export default function App() {
                   <div key={k} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 3, background: v.ok ? "rgba(0,255,213,.03)" : "rgba(255,23,68,.03)", border: `1px solid ${v.ok ? "rgba(0,255,213,.1)" : "rgba(255,23,68,.1)"}`, flex: "1 1 110px", minWidth: 110 }}>
                     <span style={{ fontSize: 18 }}>{v.icon}</span>
                     <div><div style={{ fontSize: 10, fontWeight: 700, color: v.ok ? "#00ffd5" : "#ff1744", letterSpacing: 1 }}>{v.label}</div>
-                      <div style={{ fontSize: 9, color: "rgba(255,255,255,.3)" }}>{v.detail}</div></div>
+                      <div style={{ fontSize: 9, color: "rgba(255,255,255,.45)" }}>{v.detail}</div></div>
                   </div>
                 ))}
               </div>}
@@ -833,9 +879,9 @@ export default function App() {
                   <SpeedGauge value={showDl ? dlData?.mbps : null} max={500} label="DOWNLOAD" unit="Mbps" color="#00ffd5" size={132} />
                   <SpeedGauge value={showUl ? ulData?.mbps : null} max={200} label="UPLOAD" unit="Mbps" color="#7c4dff" size={132} />
                 </div>
-                {showDl && showUl && <div style={{ display: "flex", justifyContent: "center", gap: 20, marginTop: 8 }}>
-                  <div style={{ fontSize: 9, color: "rgba(255,255,255,.25)" }}>P90↓ {dlData?.p90} Mbps</div>
-                  <div style={{ fontSize: 9, color: "rgba(255,255,255,.25)" }}>P90↑ {ulData?.p90} Mbps</div>
+                {showDl && showUl && <div style={{ display: "flex", justifyContent: "center", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
+                  <span className="np-badge" style={{ background: "rgba(0,255,213,.08)", color: "#00ffd5", borderColor: "rgba(0,255,213,.15)" }}>P90↓ {dlData?.p90} Mbps</span>
+                  <span className="np-badge" style={{ background: "rgba(124,77,255,.08)", color: "#b388ff", borderColor: "rgba(124,77,255,.15)" }}>P90↑ {ulData?.p90} Mbps</span>
                 </div>}
               </HudPanel>
             </div>}
@@ -924,9 +970,13 @@ export default function App() {
         {phase === "idle" && <div style={{ textAlign: "center", padding: "70px 20px", animation: "hudIn .5s ease both" }}>
           <div style={{ fontSize: 50, marginBottom: 12, filter: "drop-shadow(0 0 15px rgba(0,255,213,.08))" }}>◎</div>
           <div style={{ fontSize: 12, fontFamily: "var(--ff-display)", color: "rgba(0,255,213,.3)", letterSpacing: 8, marginBottom: 8 }}>SYSTEMS NOMINAL</div>
-          <div style={{ fontSize: 12, color: "rgba(255,255,255,.2)", letterSpacing: 1, maxWidth: 440, margin: "0 auto", lineHeight: 2 }}>
+          <div style={{ fontSize: 12, color: "rgba(255,255,255,.3)", letterSpacing: 1, maxWidth: 440, margin: "0 auto", lineHeight: 2 }}>
             10 measurement engines • 12 analysis patterns • Cloudflare Edge Network
           </div>
+          {connType && <div style={{ display: "flex", gap: 6, justifyContent: "center", marginTop: 10 }}>
+            <span className="np-badge" style={{ color: "#00ffd5", borderColor: "rgba(0,255,213,.15)", background: "rgba(0,255,213,.06)" }}>{CONN_TYPES.find(c => c.id === connType)?.icon} {CONN_TYPES.find(c => c.id === connType)?.label}</span>
+            <span className="np-badge" style={{ color: "#00b4d8", borderColor: "rgba(0,180,216,.15)", background: "rgba(0,180,216,.06)" }}>{SCAN_SCOPES.find(s => s.id === scanScope)?.icon} {SCAN_SCOPES.find(s => s.id === scanScope)?.label}</span>
+          </div>}
         </div>}
 
         <footer style={{ textAlign: "center", marginTop: 32, paddingTop: 12, borderTop: "1px solid rgba(255,255,255,.015)" }}>

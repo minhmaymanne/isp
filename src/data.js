@@ -284,16 +284,12 @@ export const TRACE_URLS = [
 ];
 
 export const PHASES = [
-  { id: "boot",     name: "SYSTEM BOOT" },
-  { id: "trace",    name: "CF TRACE" },
-  { id: "geo",      name: "GEOLOCATION" },
-  { id: "latency",  name: "LATENCY" },
-  { id: "download", name: "DOWNLOAD" },
-  { id: "upload",   name: "UPLOAD" },
-  { id: "dns",      name: "DNS" },
-  { id: "targets",  name: "TARGETS" },
-  { id: "analysis", name: "ANALYSIS" },
-  { id: "score",    name: "SCORE" },
+  { id: "boot",     name: "KHỞI ĐỘNG",   icon: "⚡" },
+  { id: "identify", name: "NHẬN DIỆN",   icon: "🔍" },
+  { id: "speed",    name: "TỐC ĐỘ",     icon: "⚡" },
+  { id: "dns",      name: "DNS",          icon: "🔗" },
+  { id: "targets",  name: "ỨNG DỤNG",    icon: "🌐" },
+  { id: "analysis", name: "PHÂN TÍCH",   icon: "🔬" },
 ];
 
 export const BOOT_LINES = [
