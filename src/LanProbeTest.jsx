@@ -1,451 +1,379 @@
 import { useState, useRef } from "react";
-
-const COMMON_GATEWAYS = ["192.168.1.1", "192.168.0.1", "10.0.0.1", "172.16.0.1", "192.168.88.1"];
-
-// ─── STEP 1: WebRTC ICE → tìm local IP → suy ra gateway ──────────────────────
-function discoverGateway() {
+// ─── COMMON GATEWAY FALLBACK LIST ─────────────────────────────────────────────
+// Nếu WebRTC không cho local IP (do mDNS ẩn), thử các gateway phổ biến
+const COMMON_GATEWAYS = [
+  "192.168.1.1",   // TP-Link, ASUS, D-Link phổ biến nhất
+  "192.168.0.1",   // Linksys, nhiều ISP VN
+  "192.168.2.1",   // Apple Airport
+  "10.0.0.1",      // Một số ISP VN, Viettel
+  "10.0.0.138",    // Một số modem Viettel
+  "192.168.100.1", // Một số modem cáp
+  "172.16.0.1",    // Corporate networks
+];
+// ─── STEP 1: WebRTC ICE Discovery (có xử lý mDNS) ────────────────────────────
+function discoverLocalNetwork() {
   return new Promise((resolve) => {
     const pc = new RTCPeerConnection({
       iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
     });
+    const result = {
+      ipv4s: [],        // IP số thực (nếu Chrome cho phép)
+      mdnsNames: [],    // *.local mDNS names (Chrome ẩn IP)
+      publicIP: null,   // srflx = IP WAN
+    };
     const timeout = setTimeout(() => {
       pc.close();
-      resolve({ ok: false, error: "timeout sau 6s", allIPs: [], localIPs: [], gatewayIPs: [] });
-    }, 6000);
-    const ips = new Set();
+      resolve({ ok: true, ...result, timedOut: true });
+    }, 5000);
     pc.createDataChannel("x");
     pc.onicecandidate = (e) => {
       if (!e.candidate) return;
-      const found = e.candidate.candidate.match(/(\d{1,3}(?:\.\d{1,3}){3})/g);
-      if (found) found.forEach((ip) => ips.add(ip));
+      const cand = e.candidate.candidate;
+      // Lấy tất cả IP dạng số
+      const ips = cand.match(/(\d{1,3}(?:\.\d{1,3}){3})/g) || [];
+      ips.forEach((ip) => {
+        if (ip === "0.0.0.0") return;
+        const isPrivate =
+          ip.startsWith("192.168.") ||
+          ip.startsWith("10.")      ||
+          /^172\.(1[6-9]|2\d|3[01])\./.test(ip);
+        if (isPrivate && !result.ipv4s.includes(ip)) {
+          result.ipv4s.push(ip);
+        } else if (!isPrivate && !result.publicIP) {
+          result.publicIP = ip;
+        }
+      });
+      // Lấy mDNS names (Chrome ẩn local IP thành *.local)
+      const mdns = cand.match(/([a-f0-9-]+\.local)/gi) || [];
+      mdns.forEach((name) => {
+        if (!result.mdnsNames.includes(name)) result.mdnsNames.push(name);
+      });
     };
     pc.onicegatheringstatechange = () => {
       if (pc.iceGatheringState !== "complete") return;
       clearTimeout(timeout);
       pc.close();
-      const allIPs = [...ips].filter((ip) => ip !== "0.0.0.0");
-      const localIPs = allIPs.filter((ip) =>
-        ip.startsWith("192.168.") ||
-        ip.startsWith("10.") ||
-        /^172\.(1[6-9]|2\d|3[01])\./.test(ip)
-      );
+      // Suy ra gateway từ IP tìm được
       const gatewayIPs = [
         ...new Set(
-          localIPs.map((ip) => {
+          result.ipv4s.map((ip) => {
             const p = ip.split(".");
             return `${p[0]}.${p[1]}.${p[2]}.1`;
           })
         ),
       ];
-      resolve({ ok: true, allIPs, localIPs, gatewayIPs });
+      resolve({ ok: true, ...result, gatewayIPs });
     };
     pc.createOffer().then((o) => pc.setLocalDescription(o));
   });
 }
-
-// ─── STEP 2: Probe gateway N lần, đo RTT mỗi lần ─────────────────────────────
-async function probeGatewayRTT(gatewayIP, samples = 10, onResult) {
-  const results = [];
+// ─── STEP 2a: Quick-scan gateway candidates (timeout ngắn, song song) ─────────
+// Thử fetch nhanh nhiều IP cùng lúc để tìm cái nào phản hồi
+async function scanGateways(candidates, onFound) {
+  const QUICK_TIMEOUT = 1500; // ms
+  const results = await Promise.allSettled(
+    candidates.map(async (ip) => {
+      const t0 = performance.now();
+      try {
+        await fetch(`http://${ip}/`, {
+          mode: "no-cors",
+          cache: "no-store",
+          signal: AbortSignal.timeout(QUICK_TIMEOUT),
+        });
+        const rtt = performance.now() - t0;
+        onFound?.({ ip, rtt, status: "ok" });
+        return { ip, rtt, status: "ok" };
+      } catch (err) {
+        const rtt = performance.now() - t0;
+        if (rtt < QUICK_TIMEOUT - 50) {
+          // Phản hồi nhanh = router có đó (TCP RST)
+          onFound?.({ ip, rtt, status: "refused" });
+          return { ip, rtt, status: "refused" };
+        }
+        return { ip, rtt: null, status: "timeout" };
+      }
+    })
+  );
+  return results
+    .filter((r) => r.status === "fulfilled" && r.value.rtt !== null)
+    .map((r) => r.value)
+    .sort((a, b) => a.rtt - b.rtt); // sắp xếp theo RTT tăng dần
+}
+// ─── STEP 2b: Probe gateway chính xác (nhiều mẫu) ────────────────────────────
+async function probeGatewayRTT(ip, samples, onSample) {
+  const raw = [];
   for (let i = 0; i < samples; i++) {
     const t0 = performance.now();
-    let status = "";
     try {
-      await fetch(`http://${gatewayIP}/`, {
+      await fetch(`http://${ip}/`, {
         mode: "no-cors",
         cache: "no-store",
         signal: AbortSignal.timeout(2000),
       });
       const rtt = performance.now() - t0;
-      status = "ok";
-      results.push({ rtt, status });
-      onResult?.({ i: i + 1, rtt, status });
-    } catch (err) {
+      raw.push(rtt);
+      onSample?.({ i: i + 1, rtt, status: "ok" });
+    } catch {
       const rtt = performance.now() - t0;
-      if (err.name === "AbortError" || rtt >= 2000) {
-        status = "timeout";
-        results.push({ rtt: null, status });
-        onResult?.({ i: i + 1, rtt: null, status });
+      if (rtt < 1950) {
+        raw.push(rtt);
+        onSample?.({ i: i + 1, rtt, status: "refused" });
       } else {
-        status = "refused";
-        results.push({ rtt, status });
-        onResult?.({ i: i + 1, rtt, status });
+        onSample?.({ i: i + 1, rtt: null, status: "timeout" });
       }
     }
     if (i < samples - 1) await new Promise((r) => setTimeout(r, 400));
   }
-  const valid = results.filter((r) => r.rtt !== null).map((r) => r.rtt);
-  const lost  = results.filter((r) => r.rtt === null).length;
-  if (valid.length === 0) {
-    return { ok: false, error: "Không nhận được phản hồi nào từ router" };
-  }
-  const avg    = valid.reduce((a, b) => a + b, 0) / valid.length;
-  const min    = Math.min(...valid);
-  const max    = Math.max(...valid);
+  if (!raw.length) return { ok: false };
+  const avg = raw.reduce((a, b) => a + b, 0) / raw.length;
   const jitter =
-    valid.length > 1
-      ? valid.slice(1).reduce((s, v, i) => s + Math.abs(v - valid[i]), 0) /
-        (valid.length - 1)
+    raw.length > 1
+      ? raw.slice(1).reduce((s, v, i) => s + Math.abs(v - raw[i]), 0) / (raw.length - 1)
       : 0;
-  const loss = (lost / samples) * 100;
-  return { ok: true, avg, min, max, jitter, loss, samples, valid: valid.length, results };
+  return {
+    ok: true, ip,
+    avg, min: Math.min(...raw), max: Math.max(...raw),
+    jitter, loss: ((samples - raw.length) / samples) * 100,
+    raw,
+  };
 }
-
 // ─── UI ───────────────────────────────────────────────────────────────────────
 export default function LanProbeTest() {
-  const [log, setLog]         = useState([]);
-  const [phase, setPhase]     = useState("idle");
-  const [discovery, setDisc]  = useState(null);
-  const [probeResult, setRes] = useState(null);
+  const [log, setLog]       = useState([]);
+  const [phase, setPhase]   = useState("idle");
+  const [disc, setDisc]     = useState(null);
+  const [scanRes, setScan]  = useState([]);
+  const [probeRes, setProbe]= useState(null);
   const [samples, setSamples] = useState([]);
-  const [gatewayInput, setGatewayInput] = useState("192.168.1.1");
-  const [mode, setMode]       = useState("manual"); // manual | auto
-  const running = useRef(false);
-
-  const addLog = (msg, color = "#7aadcc") =>
+  const addLog = (msg, color = "#6699bb") =>
     setLog((l) => [...l, { msg, color, t: new Date().toLocaleTimeString("vi") }]);
-
-  const runProbe = async (gw) => {
-    setPhase("step2");
-    setSamples([]);
-    setRes(null);
-    addLog(`▶ Probe ${gw} × 10 lần...`);
-    addLog(`ℹ Chrome có thể hiện popup "Cho phép truy cập mạng nội bộ" → bấm Cho phép`, "#ffcc44");
-    const result = await probeGatewayRTT(gw, 10, ({ i, rtt, status }) => {
-      setSamples((s) => [...s, { i, rtt, status }]);
-      const rttStr = rtt !== null ? `${rtt.toFixed(1)}ms` : "—";
-      const icon   = status === "ok" ? "✓" : status === "refused" ? "↯" : "✗";
-      const color  = status === "timeout" ? "#ff6666" : status === "refused" ? "#ffaa44" : "#66ff99";
-      addLog(`  [${i}/10] ${icon} RTT: ${rttStr}  (${status})`, color);
+  const run = async () => {
+    setLog([]); setDisc(null); setScan([]); setProbe(null); setSamples([]);
+    // ── STEP 1: WebRTC
+    setPhase("step1");
+    addLog("▶ STEP 1 — WebRTC ICE gathering...");
+    const d = await discoverLocalNetwork();
+    setDisc(d);
+    let gatewayCandidates = [];
+    if (d.ipv4s.length > 0) {
+      addLog(`✓ Local IPv4: ${d.ipv4s.join(", ")}`, "#66ff99");
+      addLog(`✓ Gateway guess: ${d.gatewayIPs.join(", ")}`, "#66ff99");
+      gatewayCandidates = [...d.gatewayIPs, ...COMMON_GATEWAYS];
+    } else if (d.mdnsNames.length > 0) {
+      addLog(`ℹ Chrome ẩn IP bằng mDNS: ${d.mdnsNames[0]}`, "#ffcc44");
+      addLog(`→ Không lấy được IP thực, chuyển sang scan phổ biến`, "#ffcc44");
+      gatewayCandidates = COMMON_GATEWAYS;
+    } else {
+      addLog(`ℹ Không lấy được local IP, scan danh sách phổ biến`, "#ffcc44");
+      gatewayCandidates = COMMON_GATEWAYS;
+    }
+    if (d.publicIP) addLog(`ℹ Public IP (WAN): ${d.publicIP}`, "#4488aa");
+    // ── STEP 2a: Quick scan
+    setPhase("scan");
+    addLog(`\n▶ STEP 2a — Quick scan ${gatewayCandidates.length} gateway candidates...`);
+    addLog(`ℹ Nếu Chrome hỏi "Cho phép truy cập mạng nội bộ?" → bấm Cho phép`, "#ffcc44");
+    const found = [];
+    const scanResults = await scanGateways(gatewayCandidates, ({ ip, rtt, status }) => {
+      found.push({ ip, rtt, status });
+      setScan([...found]);
+      addLog(
+        `  ${status === "ok" ? "✓" : "↯"} ${ip} → ${rtt.toFixed(0)}ms (${status})`,
+        status === "ok" ? "#66ff99" : "#ffaa44"
+      );
     });
-    setRes(result);
+    if (scanResults.length === 0) {
+      addLog("✗ Không tìm thấy gateway nào phản hồi", "#ff6666");
+      addLog("  Có thể: bị Chrome chặn, hoặc cần cấp quyền LNA", "#ff6666");
+      setPhase("done"); return;
+    }
+    const bestGW = scanResults[0].ip;
+    addLog(`\n✓ Gateway tốt nhất: ${bestGW} (${scanResults[0].rtt.toFixed(0)}ms)`, "#66ff99");
+    // ── STEP 2b: Probe chính xác
+    setPhase("probe");
+    addLog(`\n▶ STEP 2b — Probe ${bestGW} × 10 mẫu...`);
+    const result = await probeGatewayRTT(bestGW, 10, ({ i, rtt, status }) => {
+      setSamples((s) => [...s, { i, rtt, status }]);
+      const rttStr = rtt != null ? `${rtt.toFixed(1)}ms` : "loss";
+      const icon   = { ok: "✓", refused: "↯", timeout: "✗" }[status];
+      const color  = { ok: "#66ff99", refused: "#ffaa44", timeout: "#ff6666" }[status];
+      addLog(`  [${i}/10] ${icon} ${rttStr} (${status})`, color);
+    });
+    setProbe(result);
     setPhase("done");
     if (result.ok) {
-      addLog("─────────────────────────────────");
-      addLog(`avg:    ${result.avg.toFixed(2)} ms`, "#ffffff");
-      addLog(`min:    ${result.min.toFixed(2)} ms`, "#66ff99");
-      addLog(`max:    ${result.max.toFixed(2)} ms`, "#ffaa44");
-      addLog(`jitter: ${result.jitter.toFixed(2)} ms`, "#aaddff");
-      addLog(`loss:   ${result.loss.toFixed(0)}%`, result.loss > 0 ? "#ff6666" : "#66ff99");
-    } else {
-      addLog(`✗ ${result.error}`, "#ff6666");
+      addLog("\n──────────── KẾT QUẢ ────────────");
+      addLog(`avg    ${result.avg.toFixed(2)} ms`, "#ffffff");
+      addLog(`min    ${result.min.toFixed(2)} ms`, "#66ff99");
+      addLog(`max    ${result.max.toFixed(2)} ms`, "#ffaa44");
+      addLog(`jitter ${result.jitter.toFixed(2)} ms`, "#aaddff");
+      addLog(`loss   ${result.loss.toFixed(0)}%`,
+        result.loss > 0 ? "#ff6666" : "#66ff99");
     }
-    running.current = false;
   };
-
-  const runManual = async () => {
-    if (running.current) return;
-    running.current = true;
-    setLog([]); setDisc(null); setRes(null); setSamples([]);
-    const gw = gatewayInput.trim();
-    if (!/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(gw)) {
-      addLog("✗ IP không hợp lệ", "#ff6666");
-      setPhase("error"); running.current = false; return;
-    }
-    addLog(`▶ Chế độ thủ công — Gateway: ${gw}`);
-    setDisc({ ok: true, allIPs: [], localIPs: [], gatewayIPs: [gw], manual: true });
-    await runProbe(gw);
+  const phaseLabel = {
+    idle:  "▶ RUN TEST",
+    step1: "◉ Step 1: WebRTC...",
+    scan:  "◉ Step 2a: Scanning...",
+    probe: "◉ Step 2b: Probing...",
+    done:  "▶ CHẠY LẠI",
   };
-
-  const runAuto = async () => {
-    if (running.current) return;
-    running.current = true;
-    setLog([]); setDisc(null); setRes(null); setSamples([]);
-    // Step 1: WebRTC
-    setPhase("step1");
-    addLog("▶ WebRTC ICE gathering...");
-    const disc = await discoverGateway();
-    setDisc(disc);
-    if (disc.ok) {
-      addLog(`  Public IP: ${disc.allIPs.filter(ip => !disc.localIPs.includes(ip)).join(", ") || "—"}`, "#7aadcc");
-      addLog(`  Local IPs: ${disc.localIPs.join(", ") || "(trình duyệt ẩn — dùng chế độ thủ công)"}`,
-        disc.localIPs.length > 0 ? "#66ff99" : "#ffaa44");
-    }
-    let gw = null;
-    if (disc.ok && disc.gatewayIPs.length > 0) {
-      gw = disc.gatewayIPs[0];
-      addLog(`✓ Gateway tìm được: ${gw}`, "#66ff99");
-    } else {
-      // Fallback: thử các gateway phổ biến
-      addLog("⚠ Trình duyệt ẩn local IP. Thử gateway phổ biến...", "#ffcc44");
-      for (const tryGw of COMMON_GATEWAYS) {
-        addLog(`  Thử ${tryGw}...`, "#7aadcc");
-        const t0 = performance.now();
-        try {
-          await fetch(`http://${tryGw}/`, {
-            mode: "no-cors", cache: "no-store",
-            signal: AbortSignal.timeout(1500),
-          });
-          gw = tryGw;
-          addLog(`  ✓ ${tryGw} phản hồi sau ${(performance.now() - t0).toFixed(0)}ms`, "#66ff99");
-          break;
-        } catch (err) {
-          const elapsed = performance.now() - t0;
-          if (err.name !== "AbortError" && elapsed < 1500) {
-            // TCP RST = router tồn tại
-            gw = tryGw;
-            addLog(`  ↯ ${tryGw} TCP RST sau ${elapsed.toFixed(0)}ms — router tồn tại`, "#ffaa44");
-            break;
-          }
-          addLog(`  ✗ ${tryGw} timeout`, "#ff6666");
-        }
-      }
-      if (gw) {
-        setDisc((d) => ({ ...d, gatewayIPs: [gw], autoDetected: true }));
-        addLog(`✓ Gateway phát hiện: ${gw}`, "#66ff99");
-      } else {
-        addLog("✗ Không tìm được gateway. Hãy dùng chế độ THỦ CÔNG.", "#ff6666");
-        setPhase("error"); running.current = false; return;
-      }
-    }
-    await runProbe(gw);
-  };
-
-  const isRunning = phase === "step1" || phase === "step2";
-  const inputStyle = {
-    background: "#060c12", border: "1px solid #0f2030", color: "#c8dde8",
-    padding: "7px 12px", fontSize: 12, borderRadius: 4, fontFamily: "inherit",
-    outline: "none", width: 160,
-  };
-  const btnBase = {
-    background: "transparent", fontSize: 11, letterSpacing: 2,
-    borderRadius: 4, fontFamily: "inherit", padding: "9px 22px",
-  };
-
+  const busy = ["step1","scan","probe"].includes(phase);
   return (
     <div style={{
-      minHeight: "100vh", background: "#0a0f14", color: "#c8dde8",
+      minHeight: "100vh", background: "#080e14", color: "#b8ccd8",
       fontFamily: "'JetBrains Mono','Fira Code',monospace",
-      padding: "32px 20px",
+      padding: "28px 18px",
     }}>
-      <h2 style={{ fontSize: 16, letterSpacing: 3, color: "#0099ff", marginBottom: 4 }}>
-        LAN PROBE — TEST
+      <h2 style={{ fontSize: 15, letterSpacing: 3, color: "#0099ff", marginBottom: 2 }}>
+        LAN PROBE — TEST v2
       </h2>
-      <p style={{ fontSize: 10, color: "#3a5060", marginBottom: 20, letterSpacing: 1 }}>
-        Gateway RTT Probe — Đo độ trễ mạng nội bộ
+      <p style={{ fontSize: 9, color: "#2a4050", marginBottom: 20, letterSpacing: 1 }}>
+        WebRTC ICE → Gateway Scan → RTT Probe
       </p>
-
-      {/* Mode tabs */}
-      <div style={{ display: "flex", gap: 0, marginBottom: 16 }}>
-        {[["manual", "THỦ CÔNG"], ["auto", "TỰ ĐỘNG"]].map(([m, label]) => (
-          <button key={m} onClick={() => !isRunning && setMode(m)} style={{
-            ...btnBase, padding: "6px 18px", fontSize: 9, letterSpacing: 2,
-            border: `1px solid ${mode === m ? "#0088ff" : "#0f2030"}`,
-            color: mode === m ? "#0088ff" : "#3a5060",
-            cursor: isRunning ? "not-allowed" : "pointer",
-            borderRadius: m === "manual" ? "4px 0 0 4px" : "0 4px 4px 0",
-          }}>
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {/* Controls */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
-        {mode === "manual" ? (
-          <>
-            <input
-              value={gatewayInput}
-              onChange={(e) => setGatewayInput(e.target.value)}
-              placeholder="192.168.1.1"
-              disabled={isRunning}
-              style={{ ...inputStyle, opacity: isRunning ? 0.4 : 1 }}
-              onKeyDown={(e) => e.key === "Enter" && runManual()}
-            />
-            {/* Quick buttons */}
-            <div style={{ display: "flex", gap: 4 }}>
-              {COMMON_GATEWAYS.map((ip) => (
-                <button key={ip} onClick={() => { setGatewayInput(ip); }} disabled={isRunning}
-                  style={{
-                    ...btnBase, padding: "4px 8px", fontSize: 8, letterSpacing: 0,
-                    border: `1px solid ${gatewayInput === ip ? "#0066cc" : "#0f2030"}`,
-                    color: gatewayInput === ip ? "#0088ff" : "#2a4a5a",
-                    cursor: isRunning ? "not-allowed" : "pointer",
-                  }}>
-                  {ip}
-                </button>
-              ))}
-            </div>
-            <button onClick={runManual} disabled={isRunning} style={{
-              ...btnBase,
-              border: `1px solid ${isRunning ? "#1a3a4a" : "#0088ff"}`,
-              color: isRunning ? "#1a3a4a" : "#0088ff",
-              cursor: isRunning ? "not-allowed" : "pointer",
-            }}>
-              {isRunning ? "◉ Probing..." : "▶ PROBE"}
-            </button>
-          </>
-        ) : (
-          <button onClick={runAuto} disabled={isRunning} style={{
-            ...btnBase,
-            border: `1px solid ${isRunning ? "#1a3a4a" : "#0088ff"}`,
-            color: isRunning ? "#1a3a4a" : "#0088ff",
-            cursor: isRunning ? "not-allowed" : "pointer",
-          }}>
-            {phase === "step1" ? "◉ Discovering..." :
-             phase === "step2" ? "◉ Probing..." :
-             "▶ AUTO DETECT & PROBE"}
-          </button>
-        )}
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+      <button onClick={run} disabled={busy} style={{
+        background: "transparent",
+        border: `1px solid ${busy ? "#1a3040" : "#0077cc"}`,
+        color: busy ? "#1a3040" : "#0088ff",
+        padding: "9px 26px", fontSize: 10, letterSpacing: 2,
+        cursor: busy ? "not-allowed" : "pointer",
+        borderRadius: 4, fontFamily: "inherit", marginBottom: 20,
+      }}>
+        {phaseLabel[phase]}
+      </button>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
         {/* Log */}
         <div>
-          <div style={{ fontSize: 9, color: "#2a4a5a", letterSpacing: 2, marginBottom: 8 }}>
-            CONSOLE LOG
-          </div>
-          <div style={{
-            background: "#060c12", border: "1px solid #0f2030",
-            borderRadius: 5, padding: "12px 14px", minHeight: 320,
-            maxHeight: 420, overflowY: "auto",
-          }}>
-            {log.length === 0 && (
-              <div style={{ color: "#1a3040", fontSize: 10 }}>
-                {mode === "manual"
-                  ? "Nhập IP gateway rồi bấm PROBE."
-                  : "Bấm AUTO DETECT & PROBE để bắt đầu."}
-              </div>
-            )}
-            {log.map((l, i) => (
-              <div key={i} style={{ fontSize: 10, color: l.color, marginBottom: 3, lineHeight: 1.5 }}>
-                <span style={{ color: "#1a3040", marginRight: 8 }}>{l.t}</span>
-                {l.msg}
-              </div>
-            ))}
-          </div>
+          <Label>CONSOLE LOG</Label>
+          <Box minHeight={400} maxHeight={500}>
+            {log.length === 0
+              ? <Muted>Chưa có log — bấm RUN TEST</Muted>
+              : log.map((l, i) => (
+                <div key={i} style={{ fontSize: 10, color: l.color, marginBottom: 2, lineHeight: 1.5 }}>
+                  <span style={{ color: "#1a2d3a", marginRight: 6 }}>{l.t}</span>
+                  {l.msg}
+                </div>
+              ))
+            }
+          </Box>
         </div>
-        {/* Results */}
         <div>
-          {/* Discovery */}
-          <div style={{ fontSize: 9, color: "#2a4a5a", letterSpacing: 2, marginBottom: 8 }}>
-            GATEWAY INFO
-          </div>
-          <div style={{
-            background: "#060c12", border: "1px solid #0f2030",
-            borderRadius: 5, padding: "12px 14px", marginBottom: 12,
-          }}>
-            {!discovery ? (
-              <div style={{ color: "#1a3040", fontSize: 10 }}>Chưa chạy</div>
-            ) : (
+          {/* WebRTC Discovery */}
+          <Label>STEP 1 — WebRTC DISCOVERY</Label>
+          <Box minHeight={90} style={{ marginBottom: 10 }}>
+            {!disc ? <Muted>Chưa chạy</Muted> : (
               <>
-                <Row label="Mode" value={discovery.manual ? "Thủ công" : discovery.autoDetected ? "Auto-detect" : "WebRTC"} />
-                <Row label="Gateway" value={discovery.gatewayIPs?.join(", ") || "—"} color="#ffcc44" />
-                {discovery.localIPs?.length > 0 && (
-                  <Row label="Local IPs" value={discovery.localIPs.join(", ")} color="#66ff99" />
-                )}
-                {discovery.allIPs?.filter(ip => !discovery.localIPs?.includes(ip)).length > 0 && (
-                  <Row label="Public IP" value={discovery.allIPs.filter(ip => !discovery.localIPs?.includes(ip)).join(", ")} />
-                )}
+                <Row label="Local IPv4"  value={disc.ipv4s.join(", ") || "—"} color="#66ff99" />
+                <Row label="mDNS names"  value={disc.mdnsNames.join(", ") || "—"} color="#ffcc44" />
+                <Row label="Public IP"   value={disc.publicIP || "—"} color="#4488aa" />
+                <Row label="Gateway(s)"  value={disc.gatewayIPs?.join(", ") || "—"} color="#ffcc44" />
               </>
             )}
-          </div>
+          </Box>
+          {/* Scan results */}
+          <Label>STEP 2a — GATEWAY SCAN</Label>
+          <Box minHeight={80} style={{ marginBottom: 10 }}>
+            {scanRes.length === 0
+              ? <Muted>Chưa có</Muted>
+              : scanRes.map((s) => (
+                <div key={s.ip} style={{
+                  display: "flex", justifyContent: "space-between",
+                  fontSize: 10, marginBottom: 4,
+                  color: s.status === "ok" ? "#66ff99" : "#ffaa44",
+                }}>
+                  <span>{s.status === "ok" ? "✓" : "↯"} {s.ip}</span>
+                  <span>{s.rtt.toFixed(0)}ms <span style={{ color: "#2a4050" }}>({s.status})</span></span>
+                </div>
+              ))
+            }
+          </Box>
           {/* Probe samples */}
-          <div style={{ fontSize: 9, color: "#2a4a5a", letterSpacing: 2, marginBottom: 8 }}>
-            PROBE SAMPLES
-          </div>
-          <div style={{
-            background: "#060c12", border: "1px solid #0f2030",
-            borderRadius: 5, padding: "12px 14px", marginBottom: 12,
-            minHeight: 100,
-          }}>
-            {samples.length === 0 ? (
-              <div style={{ color: "#1a3040", fontSize: 10 }}>Chưa có mẫu</div>
-            ) : (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          <Label>STEP 2b — PROBE SAMPLES</Label>
+          <Box minHeight={60} style={{ marginBottom: 10 }}>
+            {samples.length === 0 ? <Muted>Chưa có</Muted> : (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
                 {samples.map((s) => (
-                  <div key={s.i} style={{
-                    fontSize: 9, padding: "3px 7px", borderRadius: 3,
-                    background: s.status === "timeout" ? "#2a0808"
-                      : s.status === "refused" ? "#2a1a00" : "#082a12",
+                  <span key={s.i} style={{
+                    fontSize: 9, padding: "2px 6px", borderRadius: 3,
+                    background: s.status === "timeout" ? "#200808"
+                      : s.status === "refused" ? "#201400" : "#082010",
                     color: s.status === "timeout" ? "#ff6666"
                       : s.status === "refused" ? "#ffaa44" : "#66ff99",
-                    border: `1px solid ${s.status === "timeout" ? "#ff666630"
-                      : s.status === "refused" ? "#ffaa4430" : "#66ff9930"}`,
                   }}>
-                    #{s.i} {s.rtt !== null ? `${s.rtt.toFixed(0)}ms` : "loss"}
-                  </div>
+                    #{s.i} {s.rtt != null ? `${s.rtt.toFixed(0)}ms` : "loss"}
+                  </span>
                 ))}
               </div>
             )}
-          </div>
+          </Box>
           {/* Final stats */}
-          {probeResult && (
+          {probeRes && (
             <>
-              <div style={{ fontSize: 9, color: "#2a4a5a", letterSpacing: 2, marginBottom: 8 }}>
-                FINAL STATS
-              </div>
-              <div style={{
-                background: "#060c12",
-                border: `1px solid ${probeResult.ok ? "#0f3020" : "#300f0f"}`,
-                borderRadius: 5, padding: "12px 14px",
-              }}>
-                {probeResult.ok ? (
+              <Label>FINAL STATS — {probeRes.ip}</Label>
+              <Box>
+                {probeRes.ok ? (
                   <>
-                    <Row label="avg RTT" value={`${probeResult.avg.toFixed(2)} ms`}
-                      color={probeResult.avg < 10 ? "#66ff99" : probeResult.avg < 50 ? "#ffcc44" : "#ff6666"} />
-                    <Row label="min RTT" value={`${probeResult.min.toFixed(2)} ms`} color="#66ff99" />
-                    <Row label="max RTT" value={`${probeResult.max.toFixed(2)} ms`} color="#ffaa44" />
-                    <Row label="jitter"  value={`${probeResult.jitter.toFixed(2)} ms`}
-                      color={probeResult.jitter < 5 ? "#66ff99" : "#ffcc44"} />
-                    <Row label="loss"    value={`${probeResult.loss.toFixed(0)}%`}
-                      color={probeResult.loss > 0 ? "#ff6666" : "#66ff99"} />
-                    <Row label="samples" value={`${probeResult.valid}/${probeResult.samples} valid`} />
-                    <div style={{ marginTop: 10, padding: "8px 10px", background: "#0a1820", borderRadius: 4 }}>
-                      <div style={{ fontSize: 9, color: "#2a4a5a", marginBottom: 4 }}>NHẬN XÉT SƠ BỘ</div>
-                      <div style={{ fontSize: 10, color: "#aabbcc", lineHeight: 1.7 }}>
-                        {probeResult.avg < 5 && probeResult.jitter < 2
-                          ? "✓ LAN rất ổn định. Kết nối dây hoặc WiFi gần router."
-                          : probeResult.avg < 20 && probeResult.jitter < 8
-                          ? "◉ LAN bình thường. Có thể có chút nhiễu."
-                          : probeResult.avg < 50
-                          ? "⚠ LAN hơi chậm. Kiểm tra dây mạng hoặc WiFi."
-                          : "✗ LAN rất chậm. Router quá tải hoặc kết nối kém."}
-                        {probeResult.loss > 5 && (
-                          <span style={{ color: "#ff6666", display: "block", marginTop: 3 }}>
-                            ⚠ Mất {probeResult.loss.toFixed(0)}% gói — đầu RJ45 hoặc cáp nghi vấn.
-                          </span>
-                        )}
-                        {probeResult.results?.some(r => r.status === "refused") && (
-                          <span style={{ color: "#ffaa44", display: "block", marginTop: 3 }}>
-                            ↯ Router từ chối HTTP nhưng TCP vẫn phản hồi → RTT vẫn hợp lệ.
-                          </span>
-                        )}
-                      </div>
+                    <Row label="avg RTT" value={`${probeRes.avg.toFixed(2)} ms`}
+                      color={probeRes.avg < 5 ? "#66ff99" : probeRes.avg < 30 ? "#ffcc44" : "#ff6666"} />
+                    <Row label="min"    value={`${probeRes.min.toFixed(2)} ms`} color="#66ff99" />
+                    <Row label="max"    value={`${probeRes.max.toFixed(2)} ms`} color="#ffaa44" />
+                    <Row label="jitter" value={`${probeRes.jitter.toFixed(2)} ms`}
+                      color={probeRes.jitter < 3 ? "#66ff99" : "#ffcc44"} />
+                    <Row label="loss"   value={`${probeRes.loss.toFixed(0)}%`}
+                      color={probeRes.loss > 0 ? "#ff6666" : "#66ff99"} />
+                    <div style={{
+                      marginTop: 10, padding: "8px", background: "#060e18",
+                      borderRadius: 4, fontSize: 10, color: "#88aabb", lineHeight: 1.7,
+                    }}>
+                      {probeRes.avg < 5 && probeRes.jitter < 2
+                        ? "✓ LAN rất ổn định"
+                        : probeRes.avg < 20
+                        ? "◉ LAN bình thường, có thể có chút nhiễu"
+                        : probeRes.avg < 80
+                        ? "⚠ LAN hơi chậm — kiểm tra dây/WiFi"
+                        : "✗ LAN rất chậm — router quá tải hoặc cáp kém"}
                     </div>
                   </>
                 ) : (
-                  <div style={{ color: "#ff6666", fontSize: 10 }}>✗ {probeResult.error}</div>
+                  <div style={{ color: "#ff6666", fontSize: 10 }}>✗ Không đo được</div>
                 )}
-              </div>
+              </Box>
             </>
           )}
         </div>
       </div>
-      {/* Ghi chú kỹ thuật */}
+      {/* Notes */}
       <div style={{
-        marginTop: 24, padding: "10px 14px",
-        border: "1px solid #0f2030", borderRadius: 5,
-        fontSize: 9, color: "#1a3040", lineHeight: 2,
+        marginTop: 20, padding: "10px 12px", border: "1px solid #0f2030",
+        borderRadius: 5, fontSize: 9, color: "#1a3040", lineHeight: 2,
       }}>
-        <div style={{ color: "#2a4050", marginBottom: 3 }}>GHI CHÚ KỸ THUẬT</div>
-        <div>▸ THỦ CÔNG: Nhập IP gateway (thường 192.168.1.1 hoặc 192.168.0.1) → probe trực tiếp</div>
-        <div>▸ TỰ ĐỘNG: WebRTC ICE → nếu trình duyệt ẩn local IP → thử lần lượt các gateway phổ biến</div>
-        <div>▸ fetch("http://gateway/") mode=no-cors — IP literal nên Chrome cho phép mixed-content</div>
-        <div>▸ Chrome có thể hiện popup LNA (Local Network Access) → bấm "Cho phép" để tiếp tục</div>
-        <div>▸ status: ok = HTTP response | refused = TCP RST (RTT vẫn hợp lệ) | timeout = mất gói</div>
+        <div style={{ color: "#2a4050", marginBottom: 2 }}>GHI CHÚ</div>
+        <div>▸ Chrome mới ẩn local IP bằng mDNS → code tự fallback sang scan danh sách gateway phổ biến</div>
+        <div>▸ Chrome 142+: sẽ hiện popup "Cho phép truy cập mạng nội bộ" → cần bấm Cho phép để đo được</div>
+        <div>▸ status=refused vẫn hợp lệ: router trả TCP RST nhanh → RTT đo được từ thời gian kết nối</div>
       </div>
     </div>
   );
 }
-
-function Row({ label, value, color = "#7aadcc" }) {
-  return (
-    <div style={{
-      display: "flex", justifyContent: "space-between",
-      fontSize: 10, marginBottom: 5, fontFamily: "monospace",
-    }}>
-      <span style={{ color: "#3a5060" }}>{label}</span>
-      <span style={{ color }}>{value || "—"}</span>
-    </div>
-  );
-}
+// ─── UI helpers ───────────────────────────────────────────────────────────────
+const Label = ({ children }) => (
+  <div style={{ fontSize: 8, color: "#1a3040", letterSpacing: 2, marginBottom: 6 }}>{children}</div>
+);
+const Muted = ({ children }) => (
+  <div style={{ color: "#1a2d3a", fontSize: 10 }}>{children}</div>
+);
+const Box = ({ children, minHeight, maxHeight, style }) => (
+  <div style={{
+    background: "#050c14", border: "1px solid #0d1e2c",
+    borderRadius: 5, padding: "10px 12px",
+    minHeight, maxHeight, overflowY: maxHeight ? "auto" : undefined,
+    marginBottom: 10, ...style,
+  }}>
+    {children}
+  </div>
+);
+const Row = ({ label, value, color = "#6699bb" }) => (
+  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, marginBottom: 4 }}>
+    <span style={{ color: "#2a4050" }}>{label}</span>
+    <span style={{ color }}>{value || "—"}</span>
+  </div>
+);
