@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { TARGETS, COLO_MAP, PHASES, BOOT_LINES, detectISP, vietnamizeCity, countryFlag, countryNameVI } from "./data.js";
+import { TARGETS, TARGET_GROUPS, COLO_MAP, PHASES, BOOT_LINES, detectISP, vietnamizeCity, countryFlag, countryNameVI } from "./data.js";
 import {
   fetchCFTrace, fetchGeoIP, measureLatency,
   measureDownload, measureUpload, probeWAN,
@@ -240,21 +240,44 @@ function M({ l, v, u, q, s }) {
 //  TARGET GRID + FINDING CARD + PHASE TIMELINE + BOOT TERMINAL
 // ═══════════════════════════════════════════════════════════════════════
 function TargetGrid({ targets, activeId }) {
-  return (<div className="np-targets-grid">
-    {TARGETS.map(t => {
-      const r = targets?.[t.id], isA = activeId === t.id;
-      const lc = !r ? "rgba(255,255,255,.05)" : r.avg < 50 ? "#00ffd5" : r.avg < 100 ? "#c6ff00" : r.avg < 200 ? "#ffd600" : "#ff9100";
-      return (<div key={t.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", borderRadius: 3, background: isA ? "rgba(0,255,213,.04)" : "rgba(255,255,255,.01)", border: `1px solid ${isA ? "rgba(0,255,213,.15)" : r ? "rgba(255,255,255,.04)" : "rgba(255,255,255,.02)"}`, transition: "all .3s", position: "relative", overflow: "hidden" }}>
-        {isA && <div style={{ position: "absolute", inset: 0, background: "linear-gradient(90deg,transparent,rgba(0,255,213,.05),transparent)", animation: "targetScan .8s linear infinite" }} />}
-        <span style={{ fontSize: 15, position: "relative", zIndex: 1 }}>{t.icon}</span>
-        <div style={{ flex: 1, position: "relative", zIndex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 10, fontWeight: 600, color: r ? "rgba(255,255,255,.6)" : "rgba(255,255,255,.15)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.name}</div>
-          <div style={{ fontSize: 8, color: "rgba(255,255,255,.2)" }}>{t.cat} • {t.region}</div>
+  return (<div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    {TARGET_GROUPS.map(group => {
+      const groupDone = group.targets.filter(t => targets?.[t.id]).length;
+      const groupTotal = group.targets.length;
+      const groupActive = group.targets.some(t => t.id === activeId);
+      return (<div key={group.id} className="np-tg-group">
+        {/* Group header */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+          <span style={{ fontSize: 14 }}>{group.icon}</span>
+          <span style={{ fontSize: 10, fontWeight: 800, color: group.accent, letterSpacing: 3, fontFamily: "var(--ff-display)" }}>{group.name}</span>
+          <div style={{ flex: 1, height: 1, background: `linear-gradient(90deg, ${group.accent}30, transparent)` }} />
+          {groupDone > 0 && <span style={{ fontSize: 9, color: "rgba(255,255,255,.3)", fontFamily: "var(--ff-display)" }}>{groupDone}/{groupTotal}</span>}
+          {groupActive && <span style={{ fontSize: 8, color: group.accent, animation: "pulse .6s infinite" }}>SCANNING</span>}
         </div>
-        <div style={{ position: "relative", zIndex: 1, textAlign: "right" }}>
-          {isA ? <span style={{ fontSize: 9, color: "#00ffd5", animation: "pulse .5s infinite" }}>●●●</span>
-            : r ? <><div style={{ fontSize: 13, fontWeight: 800, color: lc, fontFamily: "var(--ff-display)" }}>{r.avg}</div><div style={{ fontSize: 7, color: "rgba(255,255,255,.2)" }}>ms</div></>
-              : <div style={{ fontSize: 8, color: "rgba(255,255,255,.06)" }}>—</div>}
+        {/* Apps grid */}
+        <div className="np-tg-apps">
+          {group.targets.map(t => {
+            const r = targets?.[t.id], isA = activeId === t.id;
+            const lc = !r ? "rgba(255,255,255,.06)" : r.avg == null ? "#ff5252" : r.avg < 50 ? "#00ffd5" : r.avg < 100 ? "#c6ff00" : r.avg < 200 ? "#ffd600" : "#ff9100";
+            return (<div key={t.id} className={`np-tg-app${isA ? " np-tg-active" : ""}${r ? " np-tg-done" : ""}`} style={{ "--tg-accent": isA ? group.accent : lc }}>
+              {/* Glowing border overlay for active scan */}
+              {isA && <div className="np-tg-glow" style={{ "--glow-color": group.accent }} />}
+              {/* Done glow */}
+              {r && !isA && <div className="np-tg-done-glow" style={{ "--done-color": lc }} />}
+              <div style={{ display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 2 }}>
+                <span style={{ fontSize: 16, filter: isA ? "brightness(1.4)" : r ? "none" : "grayscale(1) opacity(.3)" }}>{t.icon}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: r ? "rgba(255,255,255,.75)" : "rgba(255,255,255,.18)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.name}</div>
+                  <div style={{ fontSize: 7, color: "rgba(255,255,255,.2)", letterSpacing: 1 }}>{t.region}</div>
+                </div>
+                <div style={{ textAlign: "right", minWidth: 28 }}>
+                  {isA ? <span className="np-tg-scanning" style={{ color: group.accent }}>●●●</span>
+                    : r ? <><div style={{ fontSize: 14, fontWeight: 900, color: lc, fontFamily: "var(--ff-display)", textShadow: `0 0 8px ${lc}40` }}>{r.avg ?? "✕"}</div><div style={{ fontSize: 6, color: "rgba(255,255,255,.2)", letterSpacing: 1 }}>MS</div></>
+                      : <div style={{ fontSize: 9, color: "rgba(255,255,255,.06)" }}>—</div>}
+                </div>
+              </div>
+            </div>);
+          })}
         </div>
       </div>);
     })}
@@ -497,6 +520,19 @@ export default function App() {
         .np-c3{grid-column:span 3}.np-c4{grid-column:span 4}.np-c6{grid-column:span 6}.np-c12{grid-column:span 12}
         .np-findings{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px}
         .np-targets-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:6px}
+        /* ── Target Group App Cards ── */
+        .np-tg-apps{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:5px}
+        .np-tg-app{position:relative;padding:7px 10px;border-radius:6px;background:rgba(255,255,255,.012);border:1px solid rgba(255,255,255,.03);transition:all .4s ease;overflow:hidden;cursor:default}
+        .np-tg-app.np-tg-done{background:rgba(255,255,255,.025);border-color:color-mix(in srgb,var(--tg-accent) 25%,transparent)}
+        .np-tg-app.np-tg-active{border-color:transparent;background:rgba(255,255,255,.03)}
+        /* Spinning conic gradient border for active scan */
+        .np-tg-glow{position:absolute;inset:-2px;border-radius:8px;z-index:1;pointer-events:none;background:conic-gradient(from var(--glow-angle,0deg),transparent 0%,var(--glow-color) 10%,transparent 20%,transparent 40%,var(--glow-color) 50%,transparent 60%,transparent 80%,var(--glow-color) 90%,transparent 100%);animation:glowSpin 1.2s linear infinite;-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;padding:2px}
+        @keyframes glowSpin{0%{--glow-angle:0deg}100%{--glow-angle:360deg}}
+        @property --glow-angle{syntax:"<angle>";initial-value:0deg;inherits:false}
+        /* Subtle glow for completed items */
+        .np-tg-done-glow{position:absolute;inset:0;border-radius:6px;z-index:0;pointer-events:none;box-shadow:inset 0 0 12px color-mix(in srgb,var(--done-color) 8%,transparent),0 0 6px color-mix(in srgb,var(--done-color) 5%,transparent);opacity:0;animation:doneGlowIn .6s ease forwards}
+        @keyframes doneGlowIn{to{opacity:1}}
+        .np-tg-scanning{font-size:10px;animation:pulse .45s infinite;font-weight:900;letter-spacing:2px}
         .np-id-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
         .np-id-card{padding:14px 16px;border-radius:4px;background:rgba(255,255,255,.015);border:1px solid rgba(255,255,255,.04);position:relative;transition:all .3s}
         .np-id-card:hover{background:rgba(255,255,255,.025);border-color:rgba(0,255,213,.08)}
@@ -517,6 +553,7 @@ export default function App() {
           .np-c3,.np-c4,.np-c6,.np-c12{grid-column:span 1 !important}
           .np-findings{grid-template-columns:1fr !important}
           .np-targets-grid{grid-template-columns:repeat(2,1fr) !important}
+          .np-tg-apps{grid-template-columns:repeat(2,1fr) !important}
           .np-id-grid{grid-template-columns:1fr !important}
         }
         @media(min-width:769px) and (max-width:1024px){
@@ -716,21 +753,38 @@ export default function App() {
             {(Object.keys(targetsDone).length > 0 || scanTarget) && <div className="np-c12">
               <HudPanel title="INTERNATIONAL TARGETS" icon="🌐" status={scanTarget ? "active" : "done"} accent="#00b4d8" glow={!scanTarget && Object.keys(targetsDone).length > 0} delay={.3}>
                 <TargetGrid targets={targetsDone} activeId={scanTarget} />
-                {!scanTarget && Object.keys(targetsDone).length > 0 && <div style={{ display: "flex", gap: 20, marginTop: 12, paddingTop: 10, borderTop: "1px solid rgba(255,255,255,.03)", justifyContent: "center", flexWrap: "wrap" }}>
-                  {(() => {
-                    const vals = Object.values(targetsDone).filter(t => t.avg > 0);
-                    const reachable = vals.length;
-                    const avgLat = reachable > 0 ? Math.round(vals.reduce((a, t) => a + t.avg, 0) / reachable) : 0;
-                    const totalLoss = reachable > 0 ? Math.round(vals.reduce((a, t) => a + (t.loss || 0), 0) / reachable) : 0;
-                    return [
-                      { l: "REACHABLE", v: `${reachable}/${TARGETS.length}`, c: "#00ffd5" },
-                      { l: "AVG LATENCY", v: `${avgLat}ms`, c: "#00b4d8" },
-                      { l: "AVG LOSS", v: `${totalLoss}%`, c: "#00e676" },
-                    ];
-                  })().map(s => (
-                    <div key={s.l} style={{ textAlign: "center" }}><div style={{ fontSize: 8, color: "rgba(255,255,255,.2)", letterSpacing: 2, marginBottom: 2 }}>{s.l}</div><div style={{ fontSize: 18, fontWeight: 800, color: s.c, fontFamily: "var(--ff-display)", textShadow: `0 0 10px ${s.c}25` }}>{s.v}</div></div>
-                  ))}
-                </div>}
+                {!scanTarget && Object.keys(targetsDone).length > 0 && <>
+                  {/* Per-group summary */}
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 6, marginTop: 14, paddingTop: 10, borderTop: "1px solid rgba(255,255,255,.03)" }}>
+                    {TARGET_GROUPS.map(grp => {
+                      const gVals = grp.targets.map(t => targetsDone[t.id]).filter(r => r?.avg > 0);
+                      const gAvg = gVals.length ? Math.round(gVals.reduce((a, r) => a + r.avg, 0) / gVals.length) : null;
+                      const gColor = gAvg == null ? "rgba(255,255,255,.15)" : gAvg < 50 ? "#00ffd5" : gAvg < 100 ? "#c6ff00" : gAvg < 200 ? "#ffd600" : "#ff9100";
+                      return (<div key={grp.id} style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 8px", borderRadius: 4, background: "rgba(255,255,255,.015)", border: `1px solid ${grp.accent}15` }}>
+                        <span style={{ fontSize: 12 }}>{grp.icon}</span>
+                        <span style={{ fontSize: 8, color: "rgba(255,255,255,.35)", flex: 1, letterSpacing: 1, fontFamily: "var(--ff-display)" }}>{grp.name}</span>
+                        <span style={{ fontSize: 13, fontWeight: 900, color: gColor, fontFamily: "var(--ff-display)", textShadow: `0 0 8px ${gColor}30` }}>{gAvg ?? "—"}</span>
+                        <span style={{ fontSize: 7, color: "rgba(255,255,255,.2)" }}>ms</span>
+                      </div>);
+                    })}
+                  </div>
+                  {/* Overall summary */}
+                  <div style={{ display: "flex", gap: 20, marginTop: 10, paddingTop: 10, borderTop: "1px solid rgba(255,255,255,.03)", justifyContent: "center", flexWrap: "wrap" }}>
+                    {(() => {
+                      const vals = Object.values(targetsDone).filter(t => t.avg > 0);
+                      const reachable = vals.length;
+                      const avgLat = reachable > 0 ? Math.round(vals.reduce((a, t) => a + t.avg, 0) / reachable) : 0;
+                      const totalLoss = reachable > 0 ? Math.round(vals.reduce((a, t) => a + (t.loss || 0), 0) / reachable) : 0;
+                      return [
+                        { l: "REACHABLE", v: `${reachable}/${TARGETS.length}`, c: "#00ffd5" },
+                        { l: "AVG LATENCY", v: `${avgLat}ms`, c: "#00b4d8" },
+                        { l: "AVG LOSS", v: `${totalLoss}%`, c: "#00e676" },
+                      ];
+                    })().map(s => (
+                      <div key={s.l} style={{ textAlign: "center" }}><div style={{ fontSize: 8, color: "rgba(255,255,255,.2)", letterSpacing: 2, marginBottom: 2 }}>{s.l}</div><div style={{ fontSize: 18, fontWeight: 800, color: s.c, fontFamily: "var(--ff-display)", textShadow: `0 0 10px ${s.c}25` }}>{s.v}</div></div>
+                    ))}
+                  </div>
+                </>}
               </HudPanel>
             </div>}
 

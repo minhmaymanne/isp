@@ -19,20 +19,79 @@ export const GATEWAYS = [
   { ip: "172.16.0.1",    hint: "Corporate / VPN" },
 ];
 
-export const TARGETS = [
-  { id: "cf",     name: "Cloudflare", url: "https://cloudflare.com/favicon.ico",          icon: "☁️",  cat: "CDN",      region: "HAN", crit: true },
-  { id: "google", name: "Google",     url: "https://www.google.com/favicon.ico",           icon: "🔍",  cat: "Search",   region: "SIN", crit: true },
-  { id: "fb",     name: "Facebook",   url: "https://www.facebook.com/favicon.ico",         icon: "📘",  cat: "Social",   region: "HKG", crit: true },
-  { id: "yt",     name: "YouTube",    url: "https://www.youtube.com/favicon.ico",          icon: "▶️",  cat: "Stream",   region: "SIN", crit: true },
-  { id: "aws",    name: "AWS",        url: "https://aws.amazon.com/favicon.ico",           icon: "🟧",  cat: "Cloud",    region: "SIN", crit: true },
-  { id: "shopee", name: "Shopee",     url: "https://shopee.vn/favicon.ico",                icon: "🛒",  cat: "Commerce", region: "SGN", crit: true },
-  { id: "gh",     name: "GitHub",     url: "https://github.com/favicon.ico",               icon: "🐙",  cat: "Dev",      region: "NRT" },
-  { id: "tt",     name: "TikTok",     url: "https://www.tiktok.com/favicon.ico",           icon: "🎵",  cat: "Social",   region: "SIN" },
-  { id: "wiki",   name: "Wikipedia",  url: "https://en.wikipedia.org/favicon.ico",         icon: "📚",  cat: "Info",     region: "SIN" },
-  { id: "lazada", name: "Lazada",     url: "https://www.lazada.vn/favicon.ico",            icon: "🛍️", cat: "Commerce", region: "SIN" },
-  { id: "gcloud", name: "GCP",        url: "https://cloud.google.com/favicon.ico",         icon: "☁️",  cat: "Cloud",    region: "SIN" },
-  { id: "steam",  name: "Steam",      url: "https://store.steampowered.com/favicon.ico",   icon: "🎮",  cat: "Gaming",   region: "NRT" },
+// ── Grouped international targets ─────────────────────────────────────
+export const TARGET_GROUPS = [
+  { id: "shopping", name: "MUA SẮM", icon: "🛒", accent: "#ff6d00", targets: [
+    { id: "shopee",   name: "Shopee",      url: "https://shopee.vn/favicon.ico",                 icon: "🛒", region: "SGN" },
+    { id: "lazada",   name: "Lazada",      url: "https://www.lazada.vn/favicon.ico",              icon: "🛍️", region: "SIN" },
+    { id: "tiktokshop", name: "TikTok Shop", url: "https://www.tiktok.com/favicon.ico",          icon: "🎵", region: "SIN" },
+    { id: "tiki",     name: "Tiki",        url: "https://tiki.vn/favicon.ico",                   icon: "📦", region: "SGN" },
+    { id: "grab",     name: "Grab",        url: "https://www.grab.com/favicon.ico",              icon: "🚗", region: "SIN" },
+    { id: "sendo",    name: "Sendo",       url: "https://www.sendo.vn/favicon.ico",              icon: "🏪", region: "SGN" },
+  ]},
+  { id: "social", name: "MẠNG XÃ HỘI", icon: "💬", accent: "#2979ff", targets: [
+    { id: "fb",       name: "Facebook",    url: "https://www.facebook.com/favicon.ico",           icon: "📘", region: "HKG" },
+    { id: "insta",    name: "Instagram",   url: "https://www.instagram.com/favicon.ico",          icon: "📸", region: "HKG" },
+    { id: "zalo",     name: "Zalo",        url: "https://zalo.me/favicon.ico",                   icon: "💙", region: "SGN" },
+    { id: "telegram", name: "Telegram",    url: "https://telegram.org/favicon.ico",              icon: "✈️", region: "AMS" },
+    { id: "x",        name: "X (Twitter)", url: "https://x.com/favicon.ico",                    icon: "✖️", region: "SIN" },
+    { id: "discord",  name: "Discord",     url: "https://discord.com/favicon.ico",               icon: "🎮", region: "SIN" },
+    { id: "whatsapp", name: "WhatsApp",    url: "https://web.whatsapp.com/favicon.ico",          icon: "📞", region: "SIN" },
+  ]},
+  { id: "cloud", name: "CLOUD", icon: "☁️", accent: "#00e5ff", targets: [
+    { id: "aws",      name: "AWS",         url: "https://aws.amazon.com/favicon.ico",            icon: "🟧", region: "SIN" },
+    { id: "gcloud",   name: "Google Cloud", url: "https://cloud.google.com/favicon.ico",         icon: "☁️", region: "SIN" },
+    { id: "azure",    name: "Azure",       url: "https://azure.microsoft.com/favicon.ico",       icon: "🔷", region: "SIN" },
+    { id: "cf",       name: "Cloudflare",  url: "https://cloudflare.com/favicon.ico",            icon: "🟠", region: "HAN" },
+    { id: "do",       name: "DigitalOcean", url: "https://www.digitalocean.com/favicon.ico",     icon: "🌊", region: "SIN" },
+    { id: "icloud",   name: "iCloud",      url: "https://www.icloud.com/favicon.ico",            icon: "🍎", region: "SIN" },
+    { id: "vercel",   name: "Vercel",      url: "https://vercel.com/favicon.ico",                icon: "▲",  region: "SIN" },
+  ]},
+  { id: "ai", name: "AI", icon: "🤖", accent: "#ea80fc", targets: [
+    { id: "chatgpt",  name: "ChatGPT",     url: "https://chatgpt.com/favicon.ico",               icon: "🧠", region: "SIN" },
+    { id: "claude",   name: "Claude",      url: "https://claude.ai/favicon.ico",                 icon: "🟤", region: "SIN" },
+    { id: "gemini",   name: "Gemini",      url: "https://gemini.google.com/favicon.ico",         icon: "💎", region: "SIN" },
+    { id: "grok",     name: "Grok",        url: "https://grok.com/favicon.ico",                  icon: "⚡", region: "SIN" },
+    { id: "copilot",  name: "Copilot",     url: "https://copilot.microsoft.com/favicon.ico",     icon: "🤝", region: "SIN" },
+    { id: "perplexity", name: "Perplexity", url: "https://www.perplexity.ai/favicon.ico",        icon: "🔮", region: "SIN" },
+    { id: "deepseek", name: "DeepSeek",    url: "https://www.deepseek.com/favicon.ico",          icon: "🐋", region: "SIN" },
+  ]},
+  { id: "media", name: "MEDIA", icon: "🎬", accent: "#ff1744", targets: [
+    { id: "yt",       name: "YouTube",     url: "https://www.youtube.com/favicon.ico",           icon: "▶️", region: "SIN" },
+    { id: "netflix",  name: "Netflix",     url: "https://www.netflix.com/favicon.ico",           icon: "🎬", region: "SIN" },
+    { id: "spotify",  name: "Spotify",     url: "https://www.spotify.com/favicon.ico",           icon: "🎵", region: "SIN" },
+    { id: "soundcloud", name: "SoundCloud", url: "https://soundcloud.com/favicon.ico",           icon: "🔊", region: "FRA" },
+    { id: "twitch",   name: "Twitch",      url: "https://www.twitch.tv/favicon.ico",             icon: "📺", region: "SIN" },
+    { id: "tt_media", name: "TikTok",      url: "https://www.tiktok.com/favicon.ico",            icon: "🎶", region: "SIN" },
+  ]},
+  { id: "gaming", name: "GAMING", icon: "🎮", accent: "#76ff03", targets: [
+    { id: "steam",    name: "Steam",       url: "https://store.steampowered.com/favicon.ico",    icon: "🎮", region: "NRT" },
+    { id: "garena",   name: "Garena",      url: "https://www.garena.vn/favicon.ico",             icon: "🔥", region: "SIN" },
+    { id: "riot",     name: "Riot Games",  url: "https://www.riotgames.com/favicon.ico",         icon: "⚔️", region: "SIN" },
+    { id: "epic",     name: "Epic Games",  url: "https://store.epicgames.com/favicon.ico",       icon: "🏔️", region: "SIN" },
+    { id: "roblox",   name: "Roblox",      url: "https://www.roblox.com/favicon.ico",            icon: "🧱", region: "SIN" },
+    { id: "mihoyo",   name: "HoYoverse",   url: "https://www.hoyoverse.com/favicon.ico",         icon: "⭐", region: "SIN" },
+  ]},
+  { id: "dev", name: "DEV TOOLS", icon: "🐙", accent: "#b388ff", targets: [
+    { id: "gh",       name: "GitHub",      url: "https://github.com/favicon.ico",                icon: "🐙", region: "NRT" },
+    { id: "gitlab",   name: "GitLab",      url: "https://gitlab.com/favicon.ico",                icon: "🦊", region: "SIN" },
+    { id: "npm",      name: "npm",         url: "https://www.npmjs.com/favicon.ico",             icon: "📦", region: "SIN" },
+    { id: "docker",   name: "Docker Hub",  url: "https://hub.docker.com/favicon.ico",            icon: "🐳", region: "SIN" },
+    { id: "stackoverflow", name: "StackOverflow", url: "https://stackoverflow.com/favicon.ico",  icon: "📚", region: "SIN" },
+    { id: "netlify",  name: "Netlify",     url: "https://www.netlify.com/favicon.ico",           icon: "🌐", region: "SIN" },
+  ]},
+  { id: "search", name: "TÌM KIẾM", icon: "🔍", accent: "#ffab00", targets: [
+    { id: "google",   name: "Google",      url: "https://www.google.com/favicon.ico",            icon: "🔍", region: "SIN" },
+    { id: "bing",     name: "Bing",        url: "https://www.bing.com/favicon.ico",              icon: "🅱️", region: "SIN" },
+    { id: "wiki",     name: "Wikipedia",   url: "https://en.wikipedia.org/favicon.ico",          icon: "📚", region: "SIN" },
+    { id: "ddg",      name: "DuckDuckGo",  url: "https://duckduckgo.com/favicon.ico",            icon: "🦆", region: "SIN" },
+    { id: "yahoo",    name: "Yahoo",       url: "https://www.yahoo.com/favicon.ico",             icon: "🟣", region: "SIN" },
+    { id: "baidu",    name: "Baidu",       url: "https://www.baidu.com/favicon.ico",             icon: "🐾", region: "PVG" },
+  ]},
 ];
+
+// Flat list for engine iteration
+export const TARGETS = TARGET_GROUPS.flatMap(g => g.targets);
 
 export const COLO_MAP = {
   HAN: { city: "Hà Nội",     flag: "🇻🇳", vn: true },

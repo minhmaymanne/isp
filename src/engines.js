@@ -478,19 +478,20 @@ export function readResourceTiming() {
 //  Engine I — International Target Reachability
 // ═══════════════════════════════════════════════════════════════════════
 export async function probeInternationalTargets(onTargetDone) {
+  const PROBES = 3;  // Reduced from 5 to keep total scan time reasonable with ~50 targets
   const results = {};
   for (const target of TARGETS) {
     const samples = [];
-    for (let i = 0; i < 5; i++) {
-      const ms = await imageProbe(target.url, 7000);
+    for (let i = 0; i < PROBES; i++) {
+      const ms = await imageProbe(target.url, 5000);
       if (ms > 0) samples.push(ms);
-      await sleep(80);
+      if (i < PROBES - 1) await sleep(50);
     }
     const valid = samples.filter(s => s > 0);
     results[target.id] = {
       avg: valid.length ? +mean(valid).toFixed(0) : null,
       jitter: valid.length > 1 ? +jitterCalc(valid).toFixed(0) : 0,
-      loss: +(((5 - valid.length) / 5) * 100).toFixed(0),
+      loss: +(((PROBES - valid.length) / PROBES) * 100).toFixed(0),
       min: valid.length ? +Math.min(...valid).toFixed(0) : null,
       max: valid.length ? +Math.max(...valid).toFixed(0) : null,
     };
