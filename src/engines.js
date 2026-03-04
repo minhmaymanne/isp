@@ -91,37 +91,49 @@ export async function fetchCFTrace() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-//  Engine H — GeoIP + ISP Identification
+//  Engine H — GeoIP + ISP Identification (multi-source, richest data)
 // ═══════════════════════════════════════════════════════════════════════
 export async function fetchGeoIP() {
-  // 1. Try ipapi.co (HTTPS, CORS OK)
+  // 1. Try ip-api.com (HTTP — richest data for VN ISPs, may fail on HTTPS pages)
   try {
-    const res = await fetch("https://ipapi.co/json/", {
-      cache: "no-store", signal: AbortSignal.timeout(5000),
+    const fields = [
+      "status","message","country","countryCode","region","regionName",
+      "city","zip","lat","lon","timezone","isp","org","as","asname",
+      "mobile","proxy","hosting","query",
+    ].join(",");
+    const res = await fetch(`http://ip-api.com/json/?fields=${fields}`, {
+      cache: "no-store", signal: AbortSignal.timeout(4000),
     });
     if (res.ok) {
       const d = await res.json();
-      if (d.ip) return {
-        isp: d.org || d.asn || "Unknown",
+      if (d.status === "success") return {
+        _source: "ip-api.com",
+        isp: d.isp || "Unknown",
         org: d.org || "",
-        as: d.asn || "",
-        asname: d.org || "",
+        as: d.as || "",
+        asname: d.asname || "",
         city: d.city || "",
-        regionName: d.region || "",
-        country: d.country_name || "",
-        countryCode: d.country_code || "",
-        lat: d.latitude,
-        lon: d.longitude,
-        mobile: false,
-        proxy: false,
-        hosting: false,
-        query: d.ip,
+        regionName: d.regionName || "",
+        regionCode: d.region || "",
+        zip: d.zip || "",
+        country: d.country || "",
+        countryCode: d.countryCode || "",
+        lat: d.lat,
+        lon: d.lon,
         timezone: d.timezone || "",
+        mobile: d.mobile || false,
+        proxy: d.proxy || false,
+        hosting: d.hosting || false,
+        query: d.query || "",
+        // ip-api phân biệt rõ isp vs org vs asname
+        _ispRaw: d.isp,
+        _orgRaw: d.org,
+        _asRaw: d.as,
       };
     }
   } catch {}
 
-  // 2. Fallback: ipwho.is
+  // 2. ipwho.is (HTTPS + CORS, very detailed including security flags)
   try {
     const res = await fetch("https://ipwho.is/", {
       cache: "no-store", signal: AbortSignal.timeout(5000),
@@ -129,21 +141,72 @@ export async function fetchGeoIP() {
     if (res.ok) {
       const d = await res.json();
       if (d.success !== false) return {
-        isp: d.connection?.isp || "Unknown",
+        _source: "ipwho.is",
+        isp: d.connection?.isp || d.connection?.org || "Unknown",
         org: d.connection?.org || "",
-        as: `AS${d.connection?.asn || ""}`,
+        as: d.connection?.asn ? `AS${d.connection.asn}` : "",
         asname: d.connection?.org || "",
         city: d.city || "",
         regionName: d.region || "",
+        regionCode: d.region_code || "",
+        zip: d.postal || "",
         country: d.country || "",
         countryCode: d.country_code || "",
         lat: d.latitude,
         lon: d.longitude,
+        timezone: d.timezone?.id || "",
+        timezoneAbbr: d.timezone?.abbr || "",
+        utcOffset: d.timezone?.utc || "",
         mobile: false,
         proxy: d.security?.proxy || false,
+        vpn: d.security?.vpn || false,
+        tor: d.security?.tor || false,
         hosting: d.security?.hosting || false,
+        anonymous: d.security?.anonymous || false,
+        query: d.ip || "",
+        ipType: d.type || "",
+        continent: d.continent || "",
+        continentCode: d.continent_code || "",
+        flagImg: d.flag?.img || "",
+        callingCode: d.calling_code || "",
+        _ispRaw: d.connection?.isp,
+        _orgRaw: d.connection?.org,
+        _domain: d.connection?.domain || "",
+      };
+    }
+  } catch {}
+
+  // 3. Fallback: ipapi.co (HTTPS, simpler data)
+  try {
+    const res = await fetch("https://ipapi.co/json/", {
+      cache: "no-store", signal: AbortSignal.timeout(5000),
+    });
+    if (res.ok) {
+      const d = await res.json();
+      if (d.ip) return {
+        _source: "ipapi.co",
+        isp: d.org || d.asn || "Unknown",
+        org: d.org || "",
+        as: d.asn || "",
+        asname: d.org || "",
+        city: d.city || "",
+        regionName: d.region || "",
+        regionCode: d.region_code || "",
+        zip: d.postal || "",
+        country: d.country_name || "",
+        countryCode: d.country_code || "",
+        lat: d.latitude,
+        lon: d.longitude,
+        timezone: d.timezone || "",
+        utcOffset: d.utc_offset || "",
+        mobile: false,
+        proxy: false,
+        hosting: false,
         query: d.ip,
-        timezone: d.timezone?.id || "",
+        ipType: d.version || "",
+        callingCode: d.country_calling_code || "",
+        currency: d.currency || "",
+        languages: d.languages || "",
       };
     }
   } catch {}

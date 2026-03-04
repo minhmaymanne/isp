@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { TARGETS, COLO_MAP, PHASES, BOOT_LINES, detectISP } from "./data.js";
+import { TARGETS, COLO_MAP, PHASES, BOOT_LINES, detectISP, vietnamizeCity, countryFlag, countryNameVI } from "./data.js";
 import {
   fetchCFTrace, fetchGeoIP, measureLatency,
   measureDownload, measureUpload, probeWAN,
@@ -383,7 +383,7 @@ export default function App() {
     const geoRes = await fetchGeoIP();
     collected.geo = geoRes; setGeo(geoRes);
     if (!geoRes._failed) {
-      const isp = detectISP(geoRes.isp || geoRes.org || "");
+      const isp = detectISP(geoRes.isp || geoRes.org || "", geoRes.as || geoRes._asRaw || "");
       setIspInfo(isp); setShowGeo(true);
       addLog(`ISP: ${isp.name} (${geoRes.as || "?"})`, "ok");
       addLog(`Location: ${geoRes.city}, ${geoRes.country}`, "ok");
@@ -496,11 +496,30 @@ export default function App() {
         .np-c3{grid-column:span 3}.np-c4{grid-column:span 4}.np-c6{grid-column:span 6}.np-c12{grid-column:span 12}
         .np-findings{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px}
         .np-targets-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:6px}
+        .np-id-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+        .np-id-card{padding:14px 16px;border-radius:4px;background:rgba(255,255,255,.015);border:1px solid rgba(255,255,255,.04);position:relative;transition:all .3s}
+        .np-id-card:hover{background:rgba(255,255,255,.025);border-color:rgba(0,255,213,.08)}
+        .np-id-icon{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px;margin-bottom:10px}
+        .np-id-label{font-size:9px;font-weight:700;color:rgba(255,255,255,.25);letter-spacing:3px;font-family:var(--ff-display);margin-bottom:6px}
+        .np-id-value{font-size:15px;font-weight:800;color:#f0f8ff;font-family:var(--ff-display);margin-bottom:4px;line-height:1.3}
+        .np-id-sub{font-size:10px;color:rgba(255,255,255,.3);line-height:1.6;margin-top:1px}
+        .np-id-desc{font-size:10px;color:rgba(255,255,255,.22);line-height:1.5;margin-top:6px;font-style:italic;border-top:1px solid rgba(255,255,255,.03);padding-top:6px}
+        .np-id-tag{font-size:8px;color:rgba(255,255,255,.12);margin-top:4px;letter-spacing:1px}
+        .np-id-badges{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}
+        .np-badge{font-size:9px;padding:3px 8px;border-radius:3px;background:rgba(255,255,255,.04);color:rgba(255,255,255,.4);border:1px solid rgba(255,255,255,.06);font-family:var(--ff-display);letter-spacing:1px;white-space:nowrap}
+        .np-id-rows{display:flex;flex-direction:column;gap:0}
+        .np-id-row{display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.02);font-size:10px}
+        .np-id-row span:first-child{color:rgba(255,255,255,.35)}
+        .np-id-row span:last-child{color:rgba(255,255,255,.55);font-weight:600;text-align:right}
         @media(max-width:768px){
           .np-grid{grid-template-columns:1fr !important;gap:10px}
           .np-c3,.np-c4,.np-c6,.np-c12{grid-column:span 1 !important}
           .np-findings{grid-template-columns:1fr !important}
           .np-targets-grid{grid-template-columns:repeat(2,1fr) !important}
+          .np-id-grid{grid-template-columns:1fr !important}
+        }
+        @media(min-width:769px) and (max-width:1024px){
+          .np-id-grid{grid-template-columns:repeat(2,1fr) !important}
         }
       `}</style>
 
@@ -539,34 +558,106 @@ export default function App() {
         {/* MAIN GRID */}
         {(booted || phase === "done") && (
           <div className="np-grid">
-            {/* INFO BADGES */}
-            {showTrace && <div className="np-c3" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderRadius: 3, background: "rgba(0,255,213,.02)", border: "1px solid rgba(0,255,213,.06)" }}>
-                <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#00ffd5", boxShadow: "0 0 6px #00ffd5" }} />
-                <div><div style={{ fontSize: 8, color: "rgba(255,255,255,.25)", letterSpacing: 2 }}>PUBLIC IP</div>
-                  <div style={{ fontSize: 13, fontWeight: 700, fontFamily: "var(--ff-display)", color: "#f0f8ff" }}>{trace?.ip || "—"}</div></div>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderRadius: 3, background: `${(ispInfo?.color || "#666")}08`, border: `1px solid ${(ispInfo?.color || "#666")}20` }}>
-                <div style={{ width: 6, height: 6, borderRadius: "50%", background: ispInfo?.color || "#666", boxShadow: `0 0 6px ${ispInfo?.color || "#666"}` }} />
-                <div><div style={{ fontSize: 8, color: "rgba(255,255,255,.25)", letterSpacing: 2 }}>ISP</div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: ispInfo?.color || "#f0f8ff" }}>{ispInfo?.name || geo?.isp || "—"}</div>
-                  <div style={{ fontSize: 9, color: "rgba(255,255,255,.2)" }}>{ispInfo?.tier ? `Tier ${ispInfo.tier}` : ""} {geo?.as ? `• ${geo.as}` : ""}</div></div>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderRadius: 3, background: coloInfo?.vn ? "rgba(0,230,118,.03)" : "rgba(255,214,0,.03)", border: `1px solid ${coloInfo?.vn ? "rgba(0,230,118,.12)" : "rgba(255,214,0,.12)"}` }}>
-                <span style={{ fontSize: 16 }}>{coloInfo?.flag || "🌐"}</span>
-                <div><div style={{ fontSize: 8, color: "rgba(255,255,255,.25)", letterSpacing: 2 }}>CF EDGE</div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: coloInfo?.vn ? "#00e676" : "#ffd600" }}>{trace?.colo || "?"}{coloInfo ? ` — ${coloInfo.city}` : ""}</div>
-                  <div style={{ fontSize: 9, color: "rgba(255,255,255,.2)" }}>{coloInfo?.vn ? "Optimal ✓" : coloInfo?.nearby ? "Nearby" : "Remote"}</div></div>
-              </div>
-              {showGeo && geo && !geo._failed && <div style={{ padding: "10px 14px", borderRadius: 3, background: "rgba(255,255,255,.01)", border: "1px solid rgba(255,255,255,.04)" }}>
-                <div style={{ fontSize: 8, color: "rgba(255,255,255,.2)", letterSpacing: 2, marginBottom: 4 }}>GEOLOCATION</div>
-                <div style={{ fontSize: 11, color: "rgba(255,255,255,.5)" }}>{geo.city}{geo.regionName ? `, ${geo.regionName}` : ""}</div>
-                {geo.lat && <div style={{ fontSize: 9, color: "rgba(255,255,255,.2)", marginTop: 2 }}>{geo.lat}°, {geo.lon}°</div>}
-              </div>}
+            {/* ══════ NHẬN DIỆN MẠNG — Network Identity Panel ══════ */}
+            {showTrace && <div className="np-c12">
+              <HudPanel title="NHẬN DIỆN MẠNG" icon="🔍" status={showGeo ? "done" : "active"} accent="#00ffd5" glow={showGeo} delay={.08}>
+                <div className="np-id-grid">
+                  {/* ── Địa chỉ IP ── */}
+                  <div className="np-id-card">
+                    <div className="np-id-icon" style={{ background: "rgba(0,255,213,.08)" }}>🌐</div>
+                    <div className="np-id-label">ĐỊA CHỈ IP</div>
+                    <div className="np-id-value" style={{ color: "#00ffd5" }}>{trace?.ip || "—"}</div>
+                    <div className="np-id-sub">{geo?.ipType ? geo.ipType.toUpperCase() : "IPv4"} • {trace?.visit_scheme === "https" ? "🔒 HTTPS" : "HTTP"}</div>
+                    {geo?._source && <div className="np-id-tag">via {geo._source}</div>}
+                  </div>
+
+                  {/* ── Nhà mạng (ISP) ── */}
+                  <div className="np-id-card" style={{ borderColor: `${ispInfo?.color || "#666"}18` }}>
+                    <div className="np-id-icon" style={{ background: `${ispInfo?.color || "#666"}15` }}>
+                      <span style={{ fontSize: 16 }}>📡</span>
+                    </div>
+                    <div className="np-id-label">NHÀ MẠNG</div>
+                    <div className="np-id-value" style={{ color: ispInfo?.color || "#f0f8ff" }}>{ispInfo?.name || geo?.isp || "—"}</div>
+                    {ispInfo?.fullName && <div className="np-id-sub" style={{ color: "rgba(255,255,255,.35)" }}>{ispInfo.fullName}</div>}
+                    <div className="np-id-sub">{geo?.as || geo?._asRaw || ""}{geo?.asname && geo.asname !== (geo?.isp || "") ? ` • ${geo.asname}` : ""}</div>
+                    {ispInfo?.tier > 0 && <div className="np-id-badges">
+                      <span className="np-badge" style={{ background: `${ispInfo.color}20`, color: ispInfo.color, borderColor: `${ispInfo.color}30` }}>Tier {ispInfo.tier}</span>
+                      {ispInfo.type && <span className="np-badge">{ispInfo.type}</span>}
+                    </div>}
+                    {ispInfo?.desc && <div className="np-id-desc">{ispInfo.desc}</div>}
+                    {geo?.org && geo.org !== (geo?.isp || "") && <div className="np-id-sub" style={{ marginTop: 2 }}>Tổ chức: {geo.org}</div>}
+                  </div>
+
+                  {/* ── Vị trí ── */}
+                  <div className="np-id-card">
+                    <div className="np-id-icon" style={{ background: "rgba(0,230,118,.08)" }}>
+                      <span style={{ fontSize: 18 }}>{geo?.countryCode ? countryFlag(geo.countryCode) : "📍"}</span>
+                    </div>
+                    <div className="np-id-label">VỊ TRÍ</div>
+                    <div className="np-id-value" style={{ color: "#00e676" }}>
+                      {vietnamizeCity(geo?.city, geo?.regionName) || geo?.city || "—"}
+                    </div>
+                    {geo?.regionName && geo.regionName !== geo?.city && <div className="np-id-sub">
+                      {vietnamizeCity(geo.regionName) || geo.regionName}{geo?.regionCode ? ` (${geo.regionCode})` : ""}
+                    </div>}
+                    <div className="np-id-sub" style={{ color: "rgba(255,255,255,.4)" }}>
+                      {countryNameVI(geo?.countryCode) || geo?.country || "—"} {geo?.countryCode ? countryFlag(geo.countryCode) : ""}
+                    </div>
+                    {geo?.lat != null && <div className="np-id-sub">{Number(geo.lat).toFixed(4)}°N, {Number(geo.lon).toFixed(4)}°E</div>}
+                    {geo?.zip && <div className="np-id-sub">Mã vùng: {geo.zip}</div>}
+                    {geo?.timezone && <div className="np-id-badges">
+                      <span className="np-badge">🕐 {geo.timezone}{geo?.utcOffset ? ` (${geo.utcOffset})` : ""}</span>
+                    </div>}
+                  </div>
+
+                  {/* ── Cloudflare Edge ── */}
+                  <div className="np-id-card">
+                    <div className="np-id-icon" style={{ background: coloInfo?.vn ? "rgba(0,230,118,.08)" : "rgba(255,214,0,.08)" }}>☁️</div>
+                    <div className="np-id-label">CLOUDFLARE EDGE</div>
+                    <div className="np-id-value" style={{ color: coloInfo?.vn ? "#00e676" : coloInfo?.nearby ? "#c6ff00" : "#ffd600" }}>
+                      {trace?.colo || "?"}{coloInfo ? ` — ${coloInfo.city}` : ""}
+                    </div>
+                    <div className="np-id-sub">{coloInfo?.flag || "🌐"} {coloInfo?.vn ? "PoP Việt Nam — Routing tối ưu ✓" : coloInfo?.nearby ? "PoP lân cận — Routing chấp nhận" : "PoP xa — Routing chưa tối ưu ⚠"}</div>
+                    {trace?._ms && <div className="np-id-sub">Trace RTT: <strong style={{ color: trace._ms < 50 ? "#00ffd5" : "#ffd600" }}>{trace._ms}ms</strong></div>}
+                    <div className="np-id-badges">
+                      <span className="np-badge" style={trace?.http === "h3" ? { background: "rgba(0,255,213,.12)", color: "#00ffd5", borderColor: "rgba(0,255,213,.2)" } : {}}>{trace?.http === "h3" ? "HTTP/3 QUIC" : trace?.http === "h2" ? "HTTP/2" : trace?.http || "?"}</span>
+                      <span className="np-badge">{trace?.tls || "?"}</span>
+                    </div>
+                  </div>
+
+                  {/* ── Bảo mật kết nối ── */}
+                  <div className="np-id-card">
+                    <div className="np-id-icon" style={{ background: "rgba(255,214,0,.08)" }}>🔐</div>
+                    <div className="np-id-label">BẢO MẬT KẾT NỐI</div>
+                    <div className="np-id-rows">
+                      <div className="np-id-row"><span>Mã hóa TLS</span><span style={{ color: trace?.tls?.includes("1.3") ? "#00ffd5" : "#ffd600" }}>{trace?.tls || "?"}</span></div>
+                      <div className="np-id-row"><span>Key Exchange</span><span style={{ color: trace?.kex?.includes("MLKEM") ? "#00ffd5" : "rgba(255,255,255,.5)" }}>{trace?.kex || "?"}</span></div>
+                      <div className="np-id-row"><span>Post-Quantum</span><span style={{ color: trace?.kex?.includes("MLKEM") ? "#00ffd5" : "#ffd600" }}>{trace?.kex?.includes("MLKEM") ? "✓ ML-KEM bảo vệ" : "✗ Chưa hỗ trợ"}</span></div>
+                      <div className="np-id-row"><span>SNI (Server Name)</span><span style={{ color: trace?.sni === "plaintext" ? "#ffd600" : "#00ffd5" }}>{trace?.sni === "plaintext" ? "⚠ Lộ domain" : trace?.sni === "encrypted" ? "✓ Đã mã hóa" : trace?.sni || "?"}</span></div>
+                      <div className="np-id-row"><span>WARP VPN</span><span style={{ color: trace?.warp === "on" || trace?.warp === "plus" ? "#00ffd5" : "rgba(255,255,255,.3)" }}>{trace?.warp === "on" ? "✓ Bật" : trace?.warp === "plus" ? "✓ WARP+" : "✗ Tắt"}</span></div>
+                      <div className="np-id-row"><span>Gateway</span><span>{trace?.gateway === "on" ? "✓ Active" : "✗ Off"}</span></div>
+                    </div>
+                  </div>
+
+                  {/* ── Loại kết nối ── */}
+                  <div className="np-id-card">
+                    <div className="np-id-icon" style={{ background: "rgba(0,180,216,.08)" }}>📶</div>
+                    <div className="np-id-label">LOẠI KẾT NỐI</div>
+                    <div className="np-id-rows">
+                      <div className="np-id-row"><span>Mạng</span><span style={{ color: "#00ffd5" }}>{(() => { const ni = readNetworkInfo(); return ni._unsupported ? "N/A" : (ni.type === "wifi" ? "WiFi" : ni.type === "ethernet" ? "Cáp LAN" : ni.type === "cellular" ? "Di động (4G/5G)" : ni.type || "?"); })()}</span></div>
+                      <div className="np-id-row"><span>Loại mạng</span><span style={{ color: geo?.hosting ? "#ffd600" : geo?.mobile ? "#00b4d8" : "#00e676" }}>{geo?.hosting ? "⚠ Hosting/DC" : geo?.mobile ? "📱 Di động" : "🏠 Dân dụng"}</span></div>
+                      <div className="np-id-row"><span>Proxy</span><span style={{ color: geo?.proxy ? "#ff1744" : "#00e676" }}>{geo?.proxy ? "⚠ Phát hiện proxy" : "✓ Không proxy"}</span></div>
+                      {geo?.vpn !== undefined && <div className="np-id-row"><span>VPN</span><span style={{ color: geo.vpn ? "#ffd600" : "#00e676" }}>{geo.vpn ? "⚠ Phát hiện VPN" : "✓ Không VPN"}</span></div>}
+                      {geo?.tor !== undefined && <div className="np-id-row"><span>Tor</span><span style={{ color: geo.tor ? "#ff1744" : "#00e676" }}>{geo.tor ? "⚠ Mạng Tor" : "✓ Không Tor"}</span></div>}
+                      {geo?._domain && <div className="np-id-row"><span>Domain ISP</span><span>{geo._domain}</span></div>}
+                    </div>
+                  </div>
+                </div>
+              </HudPanel>
             </div>}
 
             {/* RADAR */}
-            <div className={showTrace ? "np-c6" : "np-c12"} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+            <div className="np-c6" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
               <RadarSweep size={230} score={showScore ? scoreData?.value : null} active={phase === "running"} />
               {showScore && verdicts && <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center", width: "100%", animation: "hudIn .5s ease .2s both" }}>
                 {Object.values(verdicts).map((v, k) => (
@@ -578,18 +669,6 @@ export default function App() {
                 ))}
               </div>}
             </div>
-
-            {/* CF TRACE */}
-            {showTrace && trace && !trace._failed && <div className="np-c3">
-              <HudPanel title="CF TRACE" icon="☁️" status="done" accent="#f48118" delay={.1}>
-                <M l="Protocol" v={trace.http === "h3" ? "HTTP/3 QUIC" : trace.http === "h2" ? "HTTP/2" : trace.http || "?"} q={trace.http === "h3" ? "good" : "ok"} />
-                <M l="TLS" v={trace.tls || "?"} q={trace.tls?.includes("1.3") ? "good" : "ok"} />
-                <M l="KEX" v={trace.kex || "?"} q={trace.kex?.includes("MLKEM") ? "good" : "ok"} />
-                <M l="SNI" v={trace.sni === "plaintext" ? "Plaintext ⚠" : trace.sni || "?"} q={trace.sni === "plaintext" ? "warn" : "good"} />
-                <M l="WARP" v={trace.warp || "off"} q={trace.warp === "on" || trace.warp === "plus" ? "good" : "ok"} />
-                <M l="Trace RTT" v={trace._ms} u="ms" q={trace._ms < 50 ? "good" : "ok"} />
-              </HudPanel>
-            </div>}
 
             {/* LATENCY */}
             {(latProg.length > 0 || showLatency) && <div className="np-c6">
@@ -622,37 +701,15 @@ export default function App() {
               </HudPanel>
             </div>}
 
-            {/* DNS + SECURITY + CONNECTION */}
-            {showDns && <>{[
-              {
-                t: "DNS", i: "🔗", a: "#c6ff00", c: <>
-                  {dnsData?.domains && Object.entries(dnsData.domains).map(([d, v]) =>
-                    <M key={d} l={d} v={v ?? "—"} u="ms" q={v != null ? (v < 30 ? "good" : v < 80 ? "ok" : "warn") : null} s />
-                  )}
-                  <M l="Average" v={dnsData?.avg ?? "—"} u="ms" q={dnsData?.avg != null ? (dnsData.avg < 30 ? "good" : "ok") : null} />
-                </>
-              },
-              {
-                t: "SECURITY", i: "🔐", a: "#ffd600", c: <>
-                  <M l="TLS" v={trace?.tls || "?"} q={trace?.tls?.includes("1.3") ? "good" : "ok"} s />
-                  <M l="Post-Quantum" v={trace?.kex?.includes("MLKEM") ? "ML-KEM ✦" : "No"} q={trace?.kex?.includes("MLKEM") ? "good" : "ok"} s />
-                  <M l="QUIC/H3" v={trace?.http === "h3" ? "Active" : "No"} q={trace?.http === "h3" ? "good" : "ok"} s />
-                  <M l="ECH/SNI" v={trace?.sni === "plaintext" ? "Plain" : trace?.sni || "?"} q={trace?.sni === "plaintext" ? "warn" : "good"} s />
-                </>
-              },
-              {
-                t: "CONNECTION", i: "📡", a: "#00e676", c: <>
-                  <M l="Type" v={(() => { const ni = readNetworkInfo(); return ni._unsupported ? "N/A" : ni.type || "?"; })()} s />
-                  <M l="Proxy" v={geo?.proxy ? "Yes ⚠" : "None ✓"} q={geo?.proxy ? "warn" : "good"} s />
-                  <M l="Network" v={geo?.hosting ? "Hosting" : "Residential"} q={geo?.hosting ? "warn" : "good"} s />
-                  <M l="Timezone" v={geo?.timezone || "?"} s />
-                </>
-              },
-            ].map((p, idx) => (
-              <div key={p.t} className="np-c4">
-                <HudPanel title={p.t} icon={p.i} status="done" accent={p.a} delay={.25 + idx * .04}>{p.c}</HudPanel>
-              </div>
-            ))}</>}
+            {/* DNS */}
+            {showDns && <div className="np-c6">
+              <HudPanel title="DNS RESOLUTION" icon="🔗" status="done" accent="#c6ff00" delay={.25}>
+                {dnsData?.domains && Object.entries(dnsData.domains).map(([d, v]) =>
+                  <M key={d} l={d} v={v ?? "—"} u="ms" q={v != null ? (v < 30 ? "good" : v < 80 ? "ok" : "warn") : null} s />
+                )}
+                <M l="Trung bình" v={dnsData?.avg ?? "—"} u="ms" q={dnsData?.avg != null ? (dnsData.avg < 30 ? "good" : "ok") : null} />
+              </HudPanel>
+            </div>}
 
             {/* TARGETS */}
             {(Object.keys(targetsDone).length > 0 || scanTarget) && <div className="np-c12">

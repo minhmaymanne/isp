@@ -65,21 +65,122 @@ export const COLO_MAP = {
 };
 
 export const ISP_DB = [
-  { match: ["viettel"],            name: "Viettel",       color: "#e31937", tier: 1 },
-  { match: ["vnpt", "vinaphone"],  name: "VNPT",          color: "#0066b3", tier: 1 },
-  { match: ["fpt"],                name: "FPT Telecom",   color: "#f37021", tier: 1 },
-  { match: ["cmc"],                name: "CMC Telecom",   color: "#00a651", tier: 2 },
-  { match: ["mobifone"],           name: "Mobifone",       color: "#005baa", tier: 2 },
-  { match: ["spt", "saigon"],      name: "SPT",           color: "#ff6600", tier: 2 },
-  { match: ["netnam"],             name: "NetNam",         color: "#0099cc", tier: 2 },
+  { match: ["viettel"], as: ["AS7552","AS131429"],
+    name: "Viettel", fullName: "Tập đoàn Công nghiệp - Viễn thông Quân đội",
+    color: "#e31937", tier: 1, type: "FTTH / 4G / 5G",
+    desc: "Nhà mạng lớn nhất Việt Nam — hạ tầng cáp quang toàn quốc" },
+  { match: ["vnpt", "vinaphone"], as: ["AS45899","AS131380","AS45903"],
+    name: "VNPT", fullName: "Tập đoàn Bưu chính Viễn thông Việt Nam",
+    color: "#0066b3", tier: 1, type: "FTTH / 4G",
+    desc: "Nhà mạng quốc doanh — backbone Internet Việt Nam" },
+  { match: ["fpt"], as: ["AS18403"],
+    name: "FPT Telecom", fullName: "Công ty Cổ phần Viễn thông FPT",
+    color: "#f37021", tier: 1, type: "FTTH / 4G",
+    desc: "ISP tư nhân hàng đầu — peering quốc tế tốt" },
+  { match: ["cmc"], as: ["AS131173","AS38731"],
+    name: "CMC Telecom", fullName: "Công ty Cổ phần Hạ tầng Viễn thông CMC",
+    color: "#00a651", tier: 2, type: "FTTH / Leased Line",
+    desc: "Chuyên doanh nghiệp — data center & cloud" },
+  { match: ["mobifone"], as: ["AS131405"],
+    name: "Mobifone", fullName: "Tổng Công ty Viễn thông MobiFone",
+    color: "#005baa", tier: 2, type: "4G / 5G",
+    desc: "Nhà mạng di động quốc doanh" },
+  { match: ["spt", "saigon"], as: ["AS7643"],
+    name: "SPT", fullName: "Công ty Cổ phần Dịch vụ Bưu chính Viễn thông Sài Gòn",
+    color: "#ff6600", tier: 2, type: "FTTH / ADSL",
+    desc: "ISP khu vực TP.HCM" },
+  { match: ["netnam"], as: ["AS9902"],
+    name: "NetNam", fullName: "Công ty TNHH Thương mại & Dịch vụ NetNam",
+    color: "#0099cc", tier: 2, type: "FTTH / Leased Line",
+    desc: "ISP chuyên hosting & data center" },
+  { match: ["vietnamobile", "vn mobile"], as: ["AS135963"],
+    name: "Vietnamobile", fullName: "Công ty Cổ phần Viễn thông Di động Vietnamobile",
+    color: "#e6007e", tier: 2, type: "4G",
+    desc: "Nhà mạng di động tư nhân" },
+  { match: ["vietinfo", "gtd"], as: ["AS38247"],
+    name: "GTD (VietInfo)", fullName: "Công ty Cổ phần Viễn thông GTD",
+    color: "#6a1b9a", tier: 3, type: "Leased Line",
+    desc: "ISP doanh nghiệp" },
 ];
 
-export function detectISP(ispString) {
+export function detectISP(ispString, asString) {
   const lower = (ispString || "").toLowerCase();
+  const asLower = (asString || "").toUpperCase();
+  // Match by ISP name
   for (const isp of ISP_DB) {
     if (isp.match.some(m => lower.includes(m))) return isp;
   }
-  return { name: ispString || "Unknown", color: "#666", tier: 0 };
+  // Match by AS number
+  if (asLower) {
+    for (const isp of ISP_DB) {
+      if (isp.as?.some(a => asLower.includes(a))) return isp;
+    }
+  }
+  return { name: ispString || "Unknown ISP", fullName: ispString || "", color: "#666", tier: 0, type: "N/A", desc: "" };
+}
+
+// ── Vietnamese city/province mapping ──────────────────────────────────
+export const VN_LOCATIONS = {
+  "hanoi": "Hà Nội", "ha noi": "Hà Nội",
+  "ho chi minh city": "TP. Hồ Chí Minh", "ho chi minh": "TP. Hồ Chí Minh",
+  "hcmc": "TP. Hồ Chí Minh", "saigon": "TP. Hồ Chí Minh", "thanh pho ho chi minh": "TP. Hồ Chí Minh",
+  "da nang": "Đà Nẵng", "danang": "Đà Nẵng",
+  "hai phong": "Hải Phòng", "haiphong": "Hải Phòng",
+  "can tho": "Cần Thơ", "cantho": "Cần Thơ",
+  "bien hoa": "Biên Hòa", "dong nai": "Đồng Nai",
+  "vung tau": "Vũng Tàu", "ba ria - vung tau": "Bà Rịa - Vũng Tàu",
+  "nha trang": "Nha Trang", "khanh hoa": "Khánh Hòa",
+  "hue": "Huế", "thua thien hue": "Thừa Thiên Huế",
+  "da lat": "Đà Lạt", "lam dong": "Lâm Đồng",
+  "quy nhon": "Quy Nhơn", "binh dinh": "Bình Định",
+  "buon ma thuot": "Buôn Ma Thuột", "dak lak": "Đắk Lắk",
+  "thai nguyen": "Thái Nguyên", "bac ninh": "Bắc Ninh",
+  "vinh": "Vinh", "nghe an": "Nghệ An",
+  "thanh hoa": "Thanh Hóa", "nam dinh": "Nam Định",
+  "ha long": "Hạ Long", "quang ninh": "Quảng Ninh",
+  "phan thiet": "Phan Thiết", "binh thuan": "Bình Thuận",
+  "long xuyen": "Long Xuyên", "an giang": "An Giang",
+  "rach gia": "Rạch Giá", "kien giang": "Kiên Giang",
+  "my tho": "Mỹ Tho", "tien giang": "Tiền Giang",
+  "bac giang": "Bắc Giang", "phu tho": "Phú Thọ",
+  "hai duong": "Hải Dương", "hung yen": "Hưng Yên",
+  "ninh binh": "Ninh Bình", "ha tinh": "Hà Tĩnh",
+  "quang nam": "Quảng Nam", "quang ngai": "Quảng Ngãi",
+  "binh duong": "Bình Dương", "thu dau mot": "Thủ Dầu Một",
+  "long an": "Long An", "tay ninh": "Tây Ninh",
+  "lao cai": "Lào Cai", "dien bien": "Điện Biên",
+  "son la": "Sơn La", "yen bai": "Yên Bái",
+  "lang son": "Lạng Sơn", "cao bang": "Cao Bằng",
+  "ha giang": "Hà Giang", "tuyen quang": "Tuyên Quang",
+  "vinh phuc": "Vĩnh Phúc", "bac kan": "Bắc Kạn",
+};
+
+export function vietnamizeCity(city, region) {
+  if (!city && !region) return null;
+  const c = (city || "").toLowerCase().trim();
+  const r = (region || "").toLowerCase().trim();
+  return VN_LOCATIONS[c] || VN_LOCATIONS[r] || city || region || null;
+}
+
+// ── Country flag emoji lookup ─────────────────────────────────────────
+export function countryFlag(code) {
+  if (!code || code.length !== 2) return "🌐";
+  return String.fromCodePoint(
+    ...[...code.toUpperCase()].map(c => 0x1F1E6 + c.charCodeAt(0) - 65)
+  );
+}
+
+// ── Vietnamese country names ──────────────────────────────────────────
+const COUNTRY_VI = {
+  VN: "Việt Nam", SG: "Singapore", TH: "Thái Lan", HK: "Hồng Kông",
+  JP: "Nhật Bản", KR: "Hàn Quốc", TW: "Đài Loan", PH: "Philippines",
+  ID: "Indonesia", MY: "Malaysia", IN: "Ấn Độ", AU: "Úc",
+  US: "Hoa Kỳ", GB: "Anh Quốc", DE: "Đức", FR: "Pháp",
+  NL: "Hà Lan", CN: "Trung Quốc", CA: "Canada", RU: "Nga",
+  KH: "Campuchia", LA: "Lào", MM: "Myanmar",
+};
+export function countryNameVI(code) {
+  return COUNTRY_VI[code?.toUpperCase()] || null;
 }
 
 export const THRESHOLDS = {
