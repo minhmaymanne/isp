@@ -478,19 +478,21 @@ export function readResourceTiming() {
 //  Engine I — International Target Reachability
 // ═══════════════════════════════════════════════════════════════════════
 export async function probeInternationalTargets(onTargetDone, targetList) {
-  const PROBES = 3;
+  const PROBES = 5;
   const results = {};
   for (const target of (targetList || TARGETS)) {
     const samples = [];
     for (let i = 0; i < PROBES; i++) {
       const ms = await imageProbe(target.url, 5000);
       if (ms > 0) samples.push(ms);
-      if (i < PROBES - 1) await sleep(50);
+      if (i < PROBES - 1) await sleep(80);
     }
     const valid = samples.filter(s => s > 0);
+    // Drop the worst (first probe often has DNS/TLS overhead) and use best result
+    const best = valid.length >= 3 ? [...valid].sort((a, b) => a - b).slice(0, -1) : valid;
     results[target.id] = {
-      avg: valid.length ? +mean(valid).toFixed(0) : null,
-      jitter: valid.length > 1 ? +jitterCalc(valid).toFixed(0) : 0,
+      avg: best.length ? +Math.min(...best).toFixed(0) : null,
+      jitter: best.length > 1 ? +jitterCalc(best).toFixed(0) : 0,
       loss: +(((PROBES - valid.length) / PROBES) * 100).toFixed(0),
       min: valid.length ? +Math.min(...valid).toFixed(0) : null,
       max: valid.length ? +Math.max(...valid).toFixed(0) : null,
