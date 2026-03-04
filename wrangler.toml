@@ -1,0 +1,4 @@
+name = "isp-api"
+main = "src/index.js"
+compatibility_date = "2024-12-01"
+account_id = "b79edfaaf0abb60e8c1790d0f22d5c0e"
