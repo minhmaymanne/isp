@@ -423,22 +423,51 @@ export async function probeWAN(onUpdate) {
 // ═══════════════════════════════════════════════════════════════════════
 //  Engine E — DNS Resolution Timing
 // ═══════════════════════════════════════════════════════════════════════
+async function dnsResolve(url, domain, timeout = 3000) {
+  const full = url.replace("{domain}", domain) + `&_=${Date.now()}${Math.random()}`;
+  const t0 = performance.now();
+  await fetch(full, { cache: "no-store", signal: AbortSignal.timeout(timeout) });
+  return +(performance.now() - t0).toFixed(1);
+}
+
+const DNS_RESOLVERS = [
+  { id: "Cloudflare", url: "https://cloudflare-dns.com/dns-query?name={domain}&type=A&ct=application/dns-json" },
+  { id: "Google", url: "https://dns.google/resolve?name={domain}&type=A" },
+  { id: "Quad9", url: "https://dns.quad9.net:5053/dns-query?name={domain}&type=A&ct=application/dns-json" },
+];
+
 export async function probeDNS() {
+  // Warmup: 1 throw-away request per resolver to establish TLS sessions
+  await Promise.allSettled(DNS_RESOLVERS.map(r => dnsResolve(r.url, "example.com", 4000)));
+
   const results = {};
+  // For each domain, query all resolvers and take the median
   for (const domain of DNS_DOMAINS) {
-    try {
-      const t0 = performance.now();
-      await fetch(`https://dns.google/resolve?name=${domain}&type=A&_=${Date.now()}`, {
-        cache: "no-store", signal: AbortSignal.timeout(3000),
-      });
-      results[domain] = +(performance.now() - t0).toFixed(0);
-    } catch {
-      results[domain] = null;
+    const times = [];
+    for (const resolver of DNS_RESOLVERS) {
+      try {
+        // 2 probes per resolver, take the best
+        const samples = [];
+        for (let i = 0; i < 2; i++) {
+          const ms = await dnsResolve(resolver.url, domain, 3000);
+          samples.push(ms);
+          if (i < 1) await sleep(30);
+        }
+        times.push({ resolver: resolver.id, ms: +Math.min(...samples).toFixed(0) });
+      } catch {
+        times.push({ resolver: resolver.id, ms: null });
+      }
     }
+    // Use the median resolver time as the representative value
+    const valid = times.filter(t => t.ms != null).map(t => t.ms).sort((a, b) => a - b);
+    results[domain] = {
+      ms: valid.length ? valid[Math.floor(valid.length / 2)] : null,
+      resolvers: times,
+    };
   }
-  const valid = Object.values(results).filter(v => v !== null);
+  const allValid = Object.values(results).map(r => r.ms).filter(v => v != null);
   return {
-    avg: valid.length ? +mean(valid).toFixed(0) : null,
+    avg: allValid.length ? +mean(allValid).toFixed(0) : null,
     domains: results,
   };
 }

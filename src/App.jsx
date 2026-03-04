@@ -773,12 +773,12 @@ export default function App() {
             {(showDl || showUl || phaseIdx === 4 || phaseIdx === 5) && <div className="np-c6">
               <HudPanel title="BANDWIDTH" icon="⚡" status={showUl ? "done" : "active"} accent="#7c4dff" glow={showDl && showUl} delay={.12}>
                 <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                  <SpeedGauge value={showDl ? dlData?.mbps : null} max={500} label="DOWNLOAD" unit="Mbps" color="#00ffd5" size={132} />
-                  <SpeedGauge value={showUl ? ulData?.mbps : null} max={200} label="UPLOAD" unit="Mbps" color="#7c4dff" size={132} />
+                  <SpeedGauge value={showDl ? dlData?.p90 : null} max={500} label="DOWNLOAD" unit="Mbps" color="#00ffd5" size={132} />
+                  <SpeedGauge value={showUl ? ulData?.p90 : null} max={200} label="UPLOAD" unit="Mbps" color="#7c4dff" size={132} />
                 </div>
                 {showDl && showUl && <div style={{ display: "flex", justifyContent: "center", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
-                  <span className="np-badge" style={{ background: "rgba(0,255,213,.08)", color: "#00ffd5", borderColor: "rgba(0,255,213,.15)" }}>P90↓ {dlData?.p90} Mbps</span>
-                  <span className="np-badge" style={{ background: "rgba(124,77,255,.08)", color: "#b388ff", borderColor: "rgba(124,77,255,.15)" }}>P90↑ {ulData?.p90} Mbps</span>
+                  <span className="np-badge" style={{ background: "rgba(0,255,213,.08)", color: "#00ffd5", borderColor: "rgba(0,255,213,.15)" }}>AVG↓ {dlData?.mbps} Mbps</span>
+                  <span className="np-badge" style={{ background: "rgba(124,77,255,.08)", color: "#b388ff", borderColor: "rgba(124,77,255,.15)" }}>AVG↑ {ulData?.mbps} Mbps</span>
                 </div>}
               </HudPanel>
             </div>}
@@ -789,10 +789,11 @@ export default function App() {
                 {/* Animated bar chart */}
                 {dnsData?.domains && (() => {
                   const entries = Object.entries(dnsData.domains);
-                  const maxVal = Math.max(...entries.map(([, v]) => v ?? 0), 1);
+                  const maxVal = Math.max(...entries.map(([, v]) => v?.ms ?? 0), 1);
                   return (
                     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                      {entries.map(([d, v], i) => {
+                      {entries.map(([d, data], i) => {
+                        const v = data?.ms;
                         const pct = v != null ? (v / maxVal) * 100 : 0;
                         const c = v == null ? "rgba(255,255,255,.1)" : v < 30 ? "#00ffd5" : v < 80 ? "#c6ff00" : "#ffd600";
                         return (
@@ -809,6 +810,12 @@ export default function App() {
                                 <div style={{ position: "absolute", inset: 0, background: "linear-gradient(90deg, transparent 60%, rgba(255,255,255,.15) 80%, transparent 100%)", animation: "dnsBarShimmer 2s ease infinite" }} />
                               </div>
                             </div>
+                            {/* Resolver breakdown */}
+                            {data?.resolvers && <div style={{ display: "flex", gap: 6, marginTop: 3 }}>
+                              {data.resolvers.map(r => (
+                                <span key={r.resolver} style={{ fontSize: 8, color: r.ms != null ? (r.ms < 30 ? "rgba(0,255,213,.4)" : r.ms < 80 ? "rgba(198,255,0,.4)" : "rgba(255,214,0,.4)") : "rgba(255,255,255,.1)", letterSpacing: .5 }}>{r.resolver} {r.ms ?? "✕"}ms</span>
+                              ))}
+                            </div>}
                           </div>
                         );
                       })}
