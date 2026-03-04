@@ -92,55 +92,21 @@ export async function fetchCFTrace() {
 
 // ═══════════════════════════════════════════════════════════════════════
 //  Engine H — GeoIP + ISP Identification (multi-source, richest data)
+//  Order: HTTPS-first (most reliable), HTTP last (may be blocked)
 // ═══════════════════════════════════════════════════════════════════════
-export async function fetchGeoIP() {
-  // 1. Try ip-api.com (HTTP — richest data for VN ISPs, may fail on HTTPS pages)
-  try {
-    const fields = [
-      "status","message","country","countryCode","region","regionName",
-      "city","zip","lat","lon","timezone","isp","org","as","asname",
-      "mobile","proxy","hosting","query",
-    ].join(",");
-    const res = await fetch(`http://ip-api.com/json/?fields=${fields}`, {
-      cache: "no-store", signal: AbortSignal.timeout(4000),
-    });
-    if (res.ok) {
-      const d = await res.json();
-      if (d.status === "success") return {
-        _source: "ip-api.com",
-        isp: d.isp || "Unknown",
-        org: d.org || "",
-        as: d.as || "",
-        asname: d.asname || "",
-        city: d.city || "",
-        regionName: d.regionName || "",
-        regionCode: d.region || "",
-        zip: d.zip || "",
-        country: d.country || "",
-        countryCode: d.countryCode || "",
-        lat: d.lat,
-        lon: d.lon,
-        timezone: d.timezone || "",
-        mobile: d.mobile || false,
-        proxy: d.proxy || false,
-        hosting: d.hosting || false,
-        query: d.query || "",
-        // ip-api phân biệt rõ isp vs org vs asname
-        _ispRaw: d.isp,
-        _orgRaw: d.org,
-        _asRaw: d.as,
-      };
-    }
-  } catch {}
+export async function fetchGeoIP(traceData) {
+  const sources = [];
 
-  // 2. ipwho.is (HTTPS + CORS, very detailed including security flags)
+  // ── Source 1: ipwho.is (HTTPS + CORS, detailed + security flags) ──
   try {
+    console.log("[GeoIP] Trying ipwho.is...");
     const res = await fetch("https://ipwho.is/", {
-      cache: "no-store", signal: AbortSignal.timeout(5000),
+      cache: "no-store", signal: AbortSignal.timeout(6000),
     });
     if (res.ok) {
       const d = await res.json();
-      if (d.success !== false) return {
+      console.log("[GeoIP] ipwho.is response:", d.success, d.ip, d.connection?.isp);
+      if (d.success !== false && d.ip) return {
         _source: "ipwho.is",
         isp: d.connection?.isp || d.connection?.org || "Unknown",
         org: d.connection?.org || "",
@@ -174,16 +140,18 @@ export async function fetchGeoIP() {
         _domain: d.connection?.domain || "",
       };
     }
-  } catch {}
+  } catch (e) { console.warn("[GeoIP] ipwho.is failed:", e.message); }
 
-  // 3. Fallback: ipapi.co (HTTPS, simpler data)
+  // ── Source 2: ipapi.co (HTTPS, good for basic data) ──
   try {
+    console.log("[GeoIP] Trying ipapi.co...");
     const res = await fetch("https://ipapi.co/json/", {
-      cache: "no-store", signal: AbortSignal.timeout(5000),
+      cache: "no-store", signal: AbortSignal.timeout(6000),
     });
     if (res.ok) {
       const d = await res.json();
-      if (d.ip) return {
+      console.log("[GeoIP] ipapi.co response:", d.ip, d.org);
+      if (d.ip && !d.error) return {
         _source: "ipapi.co",
         isp: d.org || d.asn || "Unknown",
         org: d.org || "",
@@ -209,8 +177,102 @@ export async function fetchGeoIP() {
         languages: d.languages || "",
       };
     }
-  } catch {}
+  } catch (e) { console.warn("[GeoIP] ipapi.co failed:", e.message); }
 
+  // ── Source 3: ip-api.com (HTTP — richest VN ISP data, blocked on HTTPS) ──
+  try {
+    console.log("[GeoIP] Trying ip-api.com (HTTP)...");
+    const fields = "status,country,countryCode,region,regionName,city,zip,lat,lon,timezone,isp,org,as,asname,mobile,proxy,hosting,query";
+    const res = await fetch(`http://ip-api.com/json/?fields=${fields}`, {
+      cache: "no-store", signal: AbortSignal.timeout(4000),
+    });
+    if (res.ok) {
+      const d = await res.json();
+      console.log("[GeoIP] ip-api.com response:", d.status, d.isp);
+      if (d.status === "success") return {
+        _source: "ip-api.com",
+        isp: d.isp || "Unknown",
+        org: d.org || "",
+        as: d.as || "",
+        asname: d.asname || "",
+        city: d.city || "",
+        regionName: d.regionName || "",
+        regionCode: d.region || "",
+        zip: d.zip || "",
+        country: d.country || "",
+        countryCode: d.countryCode || "",
+        lat: d.lat,
+        lon: d.lon,
+        timezone: d.timezone || "",
+        mobile: d.mobile || false,
+        proxy: d.proxy || false,
+        hosting: d.hosting || false,
+        query: d.query || "",
+        _ispRaw: d.isp,
+        _orgRaw: d.org,
+        _asRaw: d.as,
+      };
+    }
+  } catch (e) { console.warn("[GeoIP] ip-api.com failed:", e.message); }
+
+  // ── Source 4: api.ip.sb (HTTPS, simple but reliable) ──
+  try {
+    console.log("[GeoIP] Trying api.ip.sb...");
+    const res = await fetch("https://api.ip.sb/geoip", {
+      cache: "no-store", signal: AbortSignal.timeout(5000),
+    });
+    if (res.ok) {
+      const d = await res.json();
+      console.log("[GeoIP] api.ip.sb response:", d.ip, d.isp);
+      if (d.ip) return {
+        _source: "api.ip.sb",
+        isp: d.isp || d.organization || "Unknown",
+        org: d.organization || "",
+        as: d.asn ? `AS${d.asn}` : "",
+        asname: d.asn_organization || d.organization || "",
+        city: d.city || "",
+        regionName: d.region || "",
+        regionCode: "",
+        zip: "",
+        country: d.country || "",
+        countryCode: d.country_code || "",
+        lat: d.latitude,
+        lon: d.longitude,
+        timezone: d.timezone || "",
+        mobile: false,
+        proxy: false,
+        hosting: false,
+        query: d.ip,
+      };
+    }
+  } catch (e) { console.warn("[GeoIP] api.ip.sb failed:", e.message); }
+
+  // ── Last resort: build from CF Trace data ──
+  if (traceData && !traceData._failed) {
+    console.log("[GeoIP] All APIs failed, using CF Trace data as fallback");
+    return {
+      _source: "cf-trace (limited)",
+      isp: "Unknown",
+      org: "",
+      as: "",
+      asname: "",
+      city: "",
+      regionName: "",
+      regionCode: "",
+      zip: "",
+      country: traceData.loc === "VN" ? "Vietnam" : traceData.loc || "",
+      countryCode: traceData.loc || "",
+      lat: null,
+      lon: null,
+      timezone: "",
+      mobile: false,
+      proxy: false,
+      hosting: false,
+      query: traceData.ip || "",
+    };
+  }
+
+  console.error("[GeoIP] ALL sources failed");
   return { _failed: true };
 }
 

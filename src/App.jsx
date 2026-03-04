@@ -380,16 +380,17 @@ export default function App() {
 
     // ═══ Phase 2: GeoIP ═══
     setPhaseIdx(2); addLog("Resolving geolocation...", "net");
-    const geoRes = await fetchGeoIP();
+    const geoRes = await fetchGeoIP(traceRes);
     collected.geo = geoRes; setGeo(geoRes);
     if (!geoRes._failed) {
       const isp = detectISP(geoRes.isp || geoRes.org || "", geoRes.as || geoRes._asRaw || "");
       setIspInfo(isp); setShowGeo(true);
       addLog(`ISP: ${isp.name} (${geoRes.as || "?"})`, "ok");
-      addLog(`Location: ${geoRes.city}, ${geoRes.country}`, "ok");
+      addLog(`Location: ${geoRes.city || "?"}, ${geoRes.country || geoRes.countryCode || "?"}`, "ok");
+      if (geoRes._source) addLog(`GeoIP source: ${geoRes._source}`, "sys");
     } else {
       setShowGeo(true);
-      addLog("GeoIP lookup failed", "warn");
+      addLog("GeoIP: tất cả API đều thất bại", "warn");
     }
 
     // ═══ Phase 3: Latency ═══
