@@ -773,8 +773,8 @@ export default function App() {
             {(showDl || showUl || phaseIdx === 4 || phaseIdx === 5) && <div className="np-c6">
               <HudPanel title="BANDWIDTH" icon="⚡" status={showUl ? "done" : "active"} accent="#7c4dff" glow={showDl && showUl} delay={.12}>
                 <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                  <SpeedGauge value={showDl ? dlData?.p90 : null} max={500} label="DOWNLOAD" unit="Mbps" color="#00ffd5" size={132} />
-                  <SpeedGauge value={showUl ? ulData?.p90 : null} max={200} label="UPLOAD" unit="Mbps" color="#7c4dff" size={132} />
+                  <SpeedGauge value={showDl ? dlData?.p90 : null} max={(() => { const v = dlData?.p90 || 0; return v > 2000 ? 10000 : v > 500 ? 5000 : v > 200 ? 1000 : v > 100 ? 500 : 200; })()} label="DOWNLOAD" unit="Mbps" color="#00ffd5" size={132} />
+                  <SpeedGauge value={showUl ? ulData?.p90 : null} max={(() => { const v = ulData?.p90 || 0; return v > 1000 ? 5000 : v > 200 ? 2000 : v > 100 ? 500 : v > 50 ? 200 : 100; })()} label="UPLOAD" unit="Mbps" color="#7c4dff" size={132} />
                 </div>
                 {showDl && showUl && <div style={{ display: "flex", justifyContent: "center", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
                   <span className="np-badge" style={{ background: "rgba(0,255,213,.08)", color: "#00ffd5", borderColor: "rgba(0,255,213,.15)" }}>AVG↓ {dlData?.mbps} Mbps</span>
