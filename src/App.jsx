@@ -627,6 +627,7 @@ export default function App() {
         @keyframes borderPulse{0%,100%{border-color:rgba(0,255,213,.08)}50%{border-color:rgba(0,255,213,.25)}}
         @keyframes targetScan{0%{transform:translateX(-100%)}100%{transform:translateX(200%)}}
         @keyframes oscScan{0%{left:-2px}100%{left:calc(100% + 2px)}}
+        @keyframes dnsBarShimmer{0%{transform:translateX(-200%)}50%{transform:translateX(200%)}100%{transform:translateX(200%)}}
         body{overflow-x:hidden;background:#010610}button{font-family:inherit;cursor:pointer}
         .np-grid{display:grid;grid-template-columns:repeat(12,1fr);gap:10px;align-items:start}
         .np-c3{grid-column:span 3}.np-c4{grid-column:span 4}.np-c6{grid-column:span 6}.np-c12{grid-column:span 12}
@@ -737,9 +738,98 @@ export default function App() {
         {/* MAIN GRID */}
         {(booted || phase === "done") && (
           <div className="np-grid">
+            {/* RADAR */}
+            <div className="np-c6" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+              <RadarSweep size={230} score={showScore ? scoreData?.value : null} active={phase === "running"} />
+              {showScore && verdicts && <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center", width: "100%", animation: "hudIn .5s ease .2s both" }}>
+                {Object.values(verdicts).map((v, k) => (
+                  <div key={k} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 3, background: v.ok ? "rgba(0,255,213,.03)" : "rgba(255,23,68,.03)", border: `1px solid ${v.ok ? "rgba(0,255,213,.1)" : "rgba(255,23,68,.1)"}`, flex: "1 1 110px", minWidth: 110 }}>
+                    <span style={{ fontSize: 18 }}>{v.icon}</span>
+                    <div><div style={{ fontSize: 10, fontWeight: 700, color: v.ok ? "#00ffd5" : "#ff1744", letterSpacing: 1 }}>{v.label}</div>
+                      <div style={{ fontSize: 9, color: "rgba(255,255,255,.45)" }}>{v.detail}</div></div>
+                  </div>
+                ))}
+              </div>}
+            </div>
+
+            {/* LATENCY */}
+            {(latProg.length > 0 || showLatency) && <div className="np-c6">
+              <HudPanel title="LATENCY OSCILLOSCOPE" icon="◎" status={showLatency ? "done" : "active"} accent="#00ffd5" glow={showLatency} delay={.08}>
+                <Oscilloscope data={showLatency && latencyData?.raw ? latencyData.raw : latProg} color="#00ffd5" height={60}
+                  label={showLatency ? `${latencyData?.raw?.length || 0} SAMPLES` : `SAMPLING ${latProg.length}/24`}
+                  active={!showLatency} />
+                {showLatency && latencyData && !latencyData._failed && <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, marginTop: 10 }}>
+                  {[{ v: latencyData.avg, l: "AVG ms", c: "#00ffd5" }, { v: latencyData.jitter, l: "JITTER ms", c: "#c6ff00" }, { v: latencyData.p90, l: "P90 ms", c: "#00b4d8" }].map(s => (
+                    <div key={s.l} style={{ textAlign: "center" }}>
+                      <div style={{ fontSize: 22, fontWeight: 900, fontFamily: "var(--ff-display)", color: s.c, textShadow: `0 0 10px ${s.c}25` }}>{s.v}</div>
+                      <div style={{ fontSize: 8, color: "rgba(255,255,255,.2)", letterSpacing: 2 }}>{s.l}</div>
+                    </div>
+                  ))}
+                </div>}
+              </HudPanel>
+            </div>}
+
+            {/* SPEED */}
+            {(showDl || showUl || phaseIdx === 4 || phaseIdx === 5) && <div className="np-c6">
+              <HudPanel title="BANDWIDTH" icon="⚡" status={showUl ? "done" : "active"} accent="#7c4dff" glow={showDl && showUl} delay={.12}>
+                <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <SpeedGauge value={showDl ? dlData?.mbps : null} max={500} label="DOWNLOAD" unit="Mbps" color="#00ffd5" size={132} />
+                  <SpeedGauge value={showUl ? ulData?.mbps : null} max={200} label="UPLOAD" unit="Mbps" color="#7c4dff" size={132} />
+                </div>
+                {showDl && showUl && <div style={{ display: "flex", justifyContent: "center", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
+                  <span className="np-badge" style={{ background: "rgba(0,255,213,.08)", color: "#00ffd5", borderColor: "rgba(0,255,213,.15)" }}>P90↓ {dlData?.p90} Mbps</span>
+                  <span className="np-badge" style={{ background: "rgba(124,77,255,.08)", color: "#b388ff", borderColor: "rgba(124,77,255,.15)" }}>P90↑ {ulData?.p90} Mbps</span>
+                </div>}
+              </HudPanel>
+            </div>}
+
+            {/* DNS */}
+            {showDns && <div className="np-c6">
+              <HudPanel title="DNS RESOLUTION" icon="🔗" status="done" accent="#c6ff00" glow delay={.16}>
+                {/* Animated bar chart */}
+                {dnsData?.domains && (() => {
+                  const entries = Object.entries(dnsData.domains);
+                  const maxVal = Math.max(...entries.map(([, v]) => v ?? 0), 1);
+                  return (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      {entries.map(([d, v], i) => {
+                        const pct = v != null ? (v / maxVal) * 100 : 0;
+                        const c = v == null ? "rgba(255,255,255,.1)" : v < 30 ? "#00ffd5" : v < 80 ? "#c6ff00" : "#ffd600";
+                        return (
+                          <div key={d} style={{ animation: `hudIn .4s ease ${.1 + i * .08}s both` }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
+                              <span style={{ fontSize: 10, color: "rgba(255,255,255,.55)", fontWeight: 500 }}>{d}</span>
+                              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                                <span style={{ fontSize: 13, fontWeight: 800, color: c, fontFamily: "var(--ff-display)", textShadow: `0 0 8px ${c}30` }}>{v ?? "—"}</span>
+                                <span style={{ fontSize: 8, color: "rgba(255,255,255,.25)" }}>ms</span>
+                              </div>
+                            </div>
+                            <div style={{ height: 6, borderRadius: 3, background: "rgba(255,255,255,.03)", overflow: "hidden", position: "relative" }}>
+                              <div style={{ height: "100%", width: `${pct}%`, borderRadius: 3, background: `linear-gradient(90deg, ${c}90, ${c})`, transition: "width 1.2s cubic-bezier(.4,0,.2,1)", boxShadow: `0 0 8px ${c}30, inset 0 1px 0 rgba(255,255,255,.15)`, position: "relative" }}>
+                                <div style={{ position: "absolute", inset: 0, background: "linear-gradient(90deg, transparent 60%, rgba(255,255,255,.15) 80%, transparent 100%)", animation: "dnsBarShimmer 2s ease infinite" }} />
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {/* Average summary */}
+                      <div style={{ marginTop: 4, paddingTop: 8, borderTop: "1px solid rgba(198,255,0,.08)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: "rgba(255,255,255,.45)", letterSpacing: 2, fontFamily: "var(--ff-display)" }}>TRUNG BÌNH</span>
+                        <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                          <span style={{ fontSize: 20, fontWeight: 900, fontFamily: "var(--ff-display)", color: dnsData.avg != null ? (dnsData.avg < 30 ? "#00ffd5" : dnsData.avg < 80 ? "#c6ff00" : "#ffd600") : "rgba(255,255,255,.2)", textShadow: dnsData.avg != null ? `0 0 12px ${dnsData.avg < 30 ? "#00ffd5" : "#c6ff00"}25` : "none" }}>{dnsData.avg ?? "—"}</span>
+                          <span style={{ fontSize: 9, color: "rgba(255,255,255,.25)" }}>ms</span>
+                          {dnsData.avg != null && <span style={{ width: 7, height: 7, borderRadius: "50%", background: dnsData.avg < 30 ? "#00ffd5" : dnsData.avg < 80 ? "#c6ff00" : "#ffd600", boxShadow: `0 0 6px ${dnsData.avg < 30 ? "#00ffd5" : "#c6ff00"}`, display: "inline-block" }} />}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </HudPanel>
+            </div>}
+
             {/* ══════ NHẬN DIỆN MẠNG — Network Identity Panel ══════ */}
             {showTrace && <div className="np-c12">
-              <HudPanel title="NHẬN DIỆN MẠNG" icon="🔍" status={showGeo ? "done" : "active"} accent="#00ffd5" glow={showGeo} delay={.08}>
+              <HudPanel title="NHẬN DIỆN MẠNG" icon="🔍" status={showGeo ? "done" : "active"} accent="#00ffd5" glow={showGeo} delay={.2}>
                 <div className="np-id-grid">
                   {/* ── Địa chỉ IP ── */}
                   <div className="np-id-card">
@@ -838,61 +928,6 @@ export default function App() {
                     </div>
                   </div>
                 </div>
-              </HudPanel>
-            </div>}
-
-            {/* RADAR */}
-            <div className="np-c6" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
-              <RadarSweep size={230} score={showScore ? scoreData?.value : null} active={phase === "running"} />
-              {showScore && verdicts && <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center", width: "100%", animation: "hudIn .5s ease .2s both" }}>
-                {Object.values(verdicts).map((v, k) => (
-                  <div key={k} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 3, background: v.ok ? "rgba(0,255,213,.03)" : "rgba(255,23,68,.03)", border: `1px solid ${v.ok ? "rgba(0,255,213,.1)" : "rgba(255,23,68,.1)"}`, flex: "1 1 110px", minWidth: 110 }}>
-                    <span style={{ fontSize: 18 }}>{v.icon}</span>
-                    <div><div style={{ fontSize: 10, fontWeight: 700, color: v.ok ? "#00ffd5" : "#ff1744", letterSpacing: 1 }}>{v.label}</div>
-                      <div style={{ fontSize: 9, color: "rgba(255,255,255,.45)" }}>{v.detail}</div></div>
-                  </div>
-                ))}
-              </div>}
-            </div>
-
-            {/* LATENCY */}
-            {(latProg.length > 0 || showLatency) && <div className="np-c6">
-              <HudPanel title="LATENCY OSCILLOSCOPE" icon="◎" status={showLatency ? "done" : "active"} accent="#00ffd5" glow={showLatency} delay={.15}>
-                <Oscilloscope data={showLatency && latencyData?.raw ? latencyData.raw : latProg} color="#00ffd5" height={60}
-                  label={showLatency ? `${latencyData?.raw?.length || 0} SAMPLES` : `SAMPLING ${latProg.length}/24`}
-                  active={!showLatency} />
-                {showLatency && latencyData && !latencyData._failed && <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, marginTop: 10 }}>
-                  {[{ v: latencyData.avg, l: "AVG ms", c: "#00ffd5" }, { v: latencyData.jitter, l: "JITTER ms", c: "#c6ff00" }, { v: latencyData.p90, l: "P90 ms", c: "#00b4d8" }].map(s => (
-                    <div key={s.l} style={{ textAlign: "center" }}>
-                      <div style={{ fontSize: 22, fontWeight: 900, fontFamily: "var(--ff-display)", color: s.c, textShadow: `0 0 10px ${s.c}25` }}>{s.v}</div>
-                      <div style={{ fontSize: 8, color: "rgba(255,255,255,.2)", letterSpacing: 2 }}>{s.l}</div>
-                    </div>
-                  ))}
-                </div>}
-              </HudPanel>
-            </div>}
-
-            {/* SPEED */}
-            {(showDl || showUl || phaseIdx === 4 || phaseIdx === 5) && <div className="np-c6">
-              <HudPanel title="BANDWIDTH" icon="⚡" status={showUl ? "done" : "active"} accent="#7c4dff" glow={showDl && showUl} delay={.2}>
-                <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                  <SpeedGauge value={showDl ? dlData?.mbps : null} max={500} label="DOWNLOAD" unit="Mbps" color="#00ffd5" size={132} />
-                  <SpeedGauge value={showUl ? ulData?.mbps : null} max={200} label="UPLOAD" unit="Mbps" color="#7c4dff" size={132} />
-                </div>
-                {showDl && showUl && <div style={{ display: "flex", justifyContent: "center", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
-                  <span className="np-badge" style={{ background: "rgba(0,255,213,.08)", color: "#00ffd5", borderColor: "rgba(0,255,213,.15)" }}>P90↓ {dlData?.p90} Mbps</span>
-                  <span className="np-badge" style={{ background: "rgba(124,77,255,.08)", color: "#b388ff", borderColor: "rgba(124,77,255,.15)" }}>P90↑ {ulData?.p90} Mbps</span>
-                </div>}
-              </HudPanel>
-            </div>}
-
-            {/* DNS */}
-            {showDns && <div className="np-c6">
-              <HudPanel title="DNS RESOLUTION" icon="🔗" status="done" accent="#c6ff00" delay={.25}>
-                {dnsData?.domains && Object.entries(dnsData.domains).map(([d, v]) =>
-                  <M key={d} l={d} v={v ?? "—"} u="ms" q={v != null ? (v < 30 ? "good" : v < 80 ? "ok" : "warn") : null} s />
-                )}
-                <M l="Trung bình" v={dnsData?.avg ?? "—"} u="ms" q={dnsData?.avg != null ? (dnsData.avg < 30 ? "good" : "ok") : null} />
               </HudPanel>
             </div>}
 
