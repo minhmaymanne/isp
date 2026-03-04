@@ -259,20 +259,19 @@ function TargetGrid({ targets, activeId, groups }) {
           {group.targets.map(t => {
             const r = targets?.[t.id], isA = activeId === t.id;
             const lc = !r ? "rgba(255,255,255,.06)" : r.avg == null ? "#ff5252" : r.avg < 50 ? "#00ffd5" : r.avg < 100 ? "#c6ff00" : r.avg < 200 ? "#ffd600" : "#ff9100";
+            const qLabel = !r ? null : r.avg == null ? "TIMEOUT" : r.avg < 30 ? "Tuyệt vời" : r.avg < 80 ? "Tốt" : r.avg < 150 ? "Khá" : r.avg < 300 ? "Chậm" : "Rất chậm";
             return (<div key={t.id} className={`np-tg-app${isA ? " np-tg-active" : ""}${r ? " np-tg-done" : ""}`} style={{ "--tg-accent": isA ? group.accent : lc }}>
-              {/* Glowing border overlay for active scan */}
               {isA && <div className="np-tg-glow" style={{ "--glow-color": group.accent }} />}
-              {/* Done glow */}
               {r && !isA && <div className="np-tg-done-glow" style={{ "--done-color": lc }} />}
               <div style={{ display: "flex", alignItems: "center", gap: 6, position: "relative", zIndex: 2 }}>
                 <span style={{ fontSize: 16, filter: isA ? "brightness(1.4)" : r ? "none" : "grayscale(1) opacity(.3)" }}>{t.icon}</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 10, fontWeight: 700, color: r ? "rgba(255,255,255,.75)" : "rgba(255,255,255,.18)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.name}</div>
-                  <div style={{ fontSize: 7, color: "rgba(255,255,255,.2)", letterSpacing: 1 }}>{t.region}</div>
+                  {r && qLabel && <div style={{ fontSize: 7, fontWeight: 600, color: lc, letterSpacing: 1 }}>{qLabel}</div>}
                 </div>
                 <div style={{ textAlign: "right", minWidth: 28 }}>
                   {isA ? <span className="np-tg-scanning" style={{ color: group.accent }}>●●●</span>
-                    : r ? <><div style={{ fontSize: 14, fontWeight: 900, color: lc, fontFamily: "var(--ff-display)", textShadow: `0 0 8px ${lc}40` }}>{r.avg ?? "✕"}</div><div style={{ fontSize: 6, color: "rgba(255,255,255,.2)", letterSpacing: 1 }}>MS</div></>
+                    : r ? <><div style={{ fontSize: 14, fontWeight: 900, color: lc, fontFamily: "var(--ff-display)", textShadow: `0 0 8px ${lc}40` }}>{r.avg ?? "✕"}</div><div style={{ fontSize: 6, color: "rgba(255,255,255,.25)", letterSpacing: 1 }}>MS</div></>
                       : <div style={{ fontSize: 9, color: "rgba(255,255,255,.06)" }}>—</div>}
                 </div>
               </div>
@@ -565,7 +564,7 @@ export default function App() {
       setTargetsDone(p => ({ ...p, [id]: result }));
       setScanTarget(id);
       const t = scopeTargets.find(x => x.id === id);
-      addLog(`${t?.icon || "•"} ${t?.name || id}: ${result.avg ?? "timeout"}ms via ${t?.region || "?"}`, "ok");
+      addLog(`${t?.icon || "•"} ${t?.name || id}: ${result.avg ?? "timeout"}ms`, "ok");
     }, scopeTargets);
     collected.targets = targetsRes;
     setScanTarget(null);
