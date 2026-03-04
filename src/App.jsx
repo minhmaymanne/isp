@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { TARGETS, TARGET_GROUPS, COLO_MAP, PHASES, BOOT_LINES, detectISP, vietnamizeCity, countryFlag, countryNameVI } from "./data.js";
+import { TARGETS, TARGET_GROUPS, SCAN_SCOPES, CONN_TYPES, COLO_MAP, PHASES, BOOT_LINES, detectISP, vietnamizeCity, countryFlag, countryNameVI } from "./data.js";
 import {
   fetchCFTrace, fetchGeoIP, measureLatency,
   measureDownload, measureUpload, probeWAN,
@@ -239,9 +239,9 @@ function M({ l, v, u, q, s }) {
 // ═══════════════════════════════════════════════════════════════════════
 //  TARGET GRID + FINDING CARD + PHASE TIMELINE + BOOT TERMINAL
 // ═══════════════════════════════════════════════════════════════════════
-function TargetGrid({ targets, activeId }) {
+function TargetGrid({ targets, activeId, groups }) {
   return (<div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-    {TARGET_GROUPS.map(group => {
+    {(groups || TARGET_GROUPS).map(group => {
       const groupDone = group.targets.filter(t => targets?.[t.id]).length;
       const groupTotal = group.targets.length;
       const groupActive = group.targets.some(t => t.id === activeId);
@@ -281,6 +281,75 @@ function TargetGrid({ targets, activeId }) {
         </div>
       </div>);
     })}
+  </div>);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  PRE-SCAN MODAL — Connection type + Scan scope selector
+// ═══════════════════════════════════════════════════════════════════════
+function PreScanModal({ onConfirm, onCancel }) {
+  const [conn, setConn] = useState("wifi");
+  const [scope, setScope] = useState("full");
+  return (<div className="np-modal-overlay" onClick={onCancel}>
+    <div className="np-modal" onClick={e => e.stopPropagation()}>
+      {/* Header */}
+      <div style={{ textAlign: "center", marginBottom: 18 }}>
+        <div style={{ fontSize: 11, letterSpacing: 6, color: "#00ffd5", fontFamily: "var(--ff-display)", fontWeight: 800, marginBottom: 4 }}>NETPROBE</div>
+        <div style={{ fontSize: 9, color: "rgba(255,255,255,.25)", letterSpacing: 2 }}>CẤU HÌNH PHÂN TÍCH</div>
+      </div>
+
+      {/* Connection Type */}
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 8, fontWeight: 700, color: "rgba(255,255,255,.3)", letterSpacing: 3, marginBottom: 8, fontFamily: "var(--ff-display)" }}>LOẠI KẾT NỐI</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
+          {CONN_TYPES.map(ct => (
+            <button key={ct.id} onClick={() => setConn(ct.id)} className={`np-opt-btn${conn === ct.id ? " np-opt-active" : ""}`} style={{ "--opt-accent": conn === ct.id ? "#00ffd5" : "rgba(255,255,255,.08)" }}>
+              <span style={{ fontSize: 20 }}>{ct.icon}</span>
+              <span style={{ fontSize: 10, fontWeight: 700, fontFamily: "var(--ff-display)", letterSpacing: 1 }}>{ct.label}</span>
+              <span style={{ fontSize: 8, color: "rgba(255,255,255,.25)" }}>{ct.desc}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Scan Scope */}
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ fontSize: 8, fontWeight: 700, color: "rgba(255,255,255,.3)", letterSpacing: 3, marginBottom: 8, fontFamily: "var(--ff-display)" }}>PHẠM VI PHÂN TÍCH</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+          {SCAN_SCOPES.map(sc => {
+            const active = scope === sc.id;
+            const groupCount = sc.groups ? sc.groups.length : TARGET_GROUPS.length;
+            const targetCount = sc.groups ? TARGET_GROUPS.filter(g => sc.groups.includes(g.id)).flatMap(g => g.targets).length : TARGETS.length;
+            return (<button key={sc.id} onClick={() => setScope(sc.id)} className={`np-scope-btn${active ? " np-scope-active" : ""}`}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, width: "100%" }}>
+                <span style={{ fontSize: 18, width: 28, textAlign: "center" }}>{sc.icon}</span>
+                <div style={{ flex: 1, textAlign: "left" }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: active ? "#fff" : "rgba(255,255,255,.5)" }}>{sc.label}</div>
+                  <div style={{ fontSize: 8, color: active ? "rgba(255,255,255,.5)" : "rgba(255,255,255,.2)" }}>{sc.desc}</div>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontSize: 12, fontWeight: 900, color: active ? "#00ffd5" : "rgba(255,255,255,.15)", fontFamily: "var(--ff-display)" }}>{targetCount}</div>
+                  <div style={{ fontSize: 7, color: "rgba(255,255,255,.15)", letterSpacing: 1 }}>APPS</div>
+                </div>
+              </div>
+              {active && sc.groups && <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 6, paddingTop: 6, borderTop: "1px solid rgba(255,255,255,.06)" }}>
+                {TARGET_GROUPS.filter(g => sc.groups.includes(g.id)).map(g => (
+                  <span key={g.id} style={{ fontSize: 7, padding: "2px 6px", borderRadius: 3, background: `${g.accent}18`, color: g.accent, letterSpacing: 1, fontFamily: "var(--ff-display)" }}>{g.icon} {g.name}</span>
+                ))}
+              </div>}
+            </button>);
+          })}
+        </div>
+      </div>
+
+      {/* Actions */}
+      <div style={{ display: "flex", gap: 8 }}>
+        <button onClick={onCancel} style={{ flex: 1, padding: "10px", background: "rgba(255,255,255,.03)", border: "1px solid rgba(255,255,255,.06)", borderRadius: 4, color: "rgba(255,255,255,.35)", fontSize: 10, fontFamily: "var(--ff-display)", letterSpacing: 2, cursor: "pointer" }}>HỦY</button>
+        <button onClick={() => onConfirm(conn, scope)} className="np-engage-btn">
+          <span style={{ fontSize: 12, fontWeight: 800, fontFamily: "var(--ff-display)", letterSpacing: 4 }}>▶ ENGAGE</span>
+        </button>
+      </div>
+    </div>
   </div>);
 }
 
@@ -362,6 +431,10 @@ export default function App() {
   const [showDns, setShowDns] = useState(false);
   const [showAnalysis, setShowAnalysis] = useState(false);
   const [showScore, setShowScore] = useState(false);
+  const [showPreScan, setShowPreScan] = useState(false);
+  const [connType, setConnType] = useState(null);
+  const [scanScope, setScanScope] = useState(null);
+  const [activeGroups, setActiveGroups] = useState(TARGET_GROUPS);
 
   const timerRef = useRef(null);
   const addLog = useCallback((msg, level = "info") => setLogs(p => [...p, { t: Date.now(), msg, level }].slice(-60)), []);
@@ -372,7 +445,19 @@ export default function App() {
     return () => clearInterval(timerRef.current);
   }, [phase]);
 
-  const run = useCallback(async () => {
+  const handleEngage = useCallback(() => setShowPreScan(true), []);
+  const handlePreScanConfirm = useCallback((conn, scopeId) => {
+    setShowPreScan(false);
+    setConnType(conn);
+    setScanScope(scopeId);
+    const scopeDef = SCAN_SCOPES.find(s => s.id === scopeId);
+    const groups = scopeDef?.groups ? TARGET_GROUPS.filter(g => scopeDef.groups.includes(g.id)) : TARGET_GROUPS;
+    setActiveGroups(groups);
+    run(conn, groups);
+  }, []);
+
+  const run = useCallback(async (conn, groups) => {
+    const scopeTargets = (groups || TARGET_GROUPS).flatMap(g => g.targets);
     // Reset all
     setPhase("booting"); setPhaseIdx(0); setElapsed(0); setBooted(false);
     setTrace(null); setGeo(null); setIspInfo(null); setColoInfo(null);
@@ -384,6 +469,8 @@ export default function App() {
     setShowDl(false); setShowUl(false); setShowDns(false);
     setShowAnalysis(false); setShowScore(false); setLogs([]);
     addLog("Initiating boot sequence...", "sys");
+    const connLabel = CONN_TYPES.find(c => c.id === conn)?.label || conn;
+    addLog(`Kết nối: ${connLabel} • Targets: ${scopeTargets.length} apps`, "sys");
     await sleep(2200); setBooted(true); setPhase("running");
     const collected = {};
 
@@ -449,13 +536,13 @@ export default function App() {
     addLog(`DNS: avg ${dnsRes.avg}ms`, "ok");
 
     // ═══ Phase 7: International Targets ═══
-    setPhaseIdx(7); addLog(`Scanning ${TARGETS.length} international targets...`, "net");
+    setPhaseIdx(7); addLog(`Scanning ${scopeTargets.length} targets...`, "net");
     const targetsRes = await probeInternationalTargets((id, result) => {
       setTargetsDone(p => ({ ...p, [id]: result }));
       setScanTarget(id);
-      const t = TARGETS.find(x => x.id === id);
+      const t = scopeTargets.find(x => x.id === id);
       addLog(`${t?.icon || "•"} ${t?.name || id}: ${result.avg ?? "timeout"}ms via ${t?.region || "?"}`, "ok");
-    });
+    }, scopeTargets);
     collected.targets = targetsRes;
     setScanTarget(null);
 
@@ -548,6 +635,19 @@ export default function App() {
         .np-id-row{display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.02);font-size:10px}
         .np-id-row span:first-child{color:rgba(255,255,255,.35)}
         .np-id-row span:last-child{color:rgba(255,255,255,.55);font-weight:600;text-align:right}
+        /* ── Pre-scan Modal ── */
+        .np-modal-overlay{position:fixed;inset:0;z-index:100;background:rgba(1,6,16,.85);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;animation:fadeIn .25s ease}
+        @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+        .np-modal{background:linear-gradient(160deg,rgba(10,16,36,.98),rgba(5,10,25,.98));border:1px solid rgba(0,255,213,.1);border-radius:10px;padding:24px;max-width:420px;width:92%;max-height:90vh;overflow-y:auto;animation:modalSlide .3s ease;box-shadow:0 0 60px rgba(0,255,213,.05),0 0 2px rgba(0,255,213,.15)}
+        @keyframes modalSlide{from{opacity:0;transform:translateY(20px) scale(.96)}to{opacity:1;transform:translateY(0) scale(1)}}
+        .np-opt-btn{display:flex;flex-direction:column;align-items:center;gap:4px;padding:12px 6px;background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.05);border-radius:6px;cursor:pointer;transition:all .25s;color:#fff}
+        .np-opt-btn:hover{background:rgba(255,255,255,.04);border-color:rgba(255,255,255,.1)}
+        .np-opt-btn.np-opt-active{background:rgba(0,255,213,.06);border-color:rgba(0,255,213,.3);box-shadow:0 0 12px rgba(0,255,213,.08)}
+        .np-scope-btn{display:flex;flex-direction:column;padding:10px 12px;background:rgba(255,255,255,.015);border:1px solid rgba(255,255,255,.04);border-radius:6px;cursor:pointer;transition:all .25s;color:#fff;text-align:left}
+        .np-scope-btn:hover{background:rgba(255,255,255,.03);border-color:rgba(255,255,255,.08)}
+        .np-scope-btn.np-scope-active{background:rgba(0,255,213,.04);border-color:rgba(0,255,213,.2);box-shadow:0 0 12px rgba(0,255,213,.06)}
+        .np-engage-btn{flex:2;padding:10px;background:linear-gradient(135deg,rgba(0,255,213,.12),rgba(0,180,216,.12));border:1px solid rgba(0,255,213,.3);border-radius:4px;color:#00ffd5;cursor:pointer;transition:all .3s;position:relative;overflow:hidden}
+        .np-engage-btn:hover{background:linear-gradient(135deg,rgba(0,255,213,.18),rgba(0,180,216,.18));border-color:rgba(0,255,213,.5);box-shadow:0 0 20px rgba(0,255,213,.1)}
         @media(max-width:768px){
           .np-grid{grid-template-columns:1fr !important;gap:10px}
           .np-c3,.np-c4,.np-c6,.np-c12{grid-column:span 1 !important}
@@ -561,6 +661,7 @@ export default function App() {
         }
       `}</style>
 
+      {showPreScan && <PreScanModal onConfirm={handlePreScanConfirm} onCancel={() => setShowPreScan(false)} />}
       <CommandCanvas phase={phase} />
       <div style={{ position: "fixed", inset: 0, zIndex: 1, pointerEvents: "none", background: "repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.025) 2px,rgba(0,0,0,.025) 4px)" }} />
       <div style={{ position: "fixed", inset: 0, zIndex: 1, pointerEvents: "none", opacity: .025, backgroundImage: "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")" }} />
@@ -581,9 +682,9 @@ export default function App() {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             {(phase === "running" || phase === "done") && <div style={{ fontSize: 18, fontFamily: "var(--ff-display)", color: phase === "done" ? g.c : "#00b4d8", fontWeight: 700, letterSpacing: 3, textShadow: `0 0 8px ${phase === "done" ? g.c : "#00b4d8"}25` }}>{fmtT(elapsed)}</div>}
-            {phase === "idle" ? <button onClick={run} style={{ background: "transparent", border: "1px solid rgba(0,255,213,.2)", borderRadius: 3, padding: "12px 32px", animation: "borderPulse 3s ease infinite" }}>
+            {phase === "idle" ? <button onClick={handleEngage} style={{ background: "transparent", border: "1px solid rgba(0,255,213,.2)", borderRadius: 3, padding: "12px 32px", animation: "borderPulse 3s ease infinite" }}>
               <span style={{ color: "#00ffd5", fontSize: 12, fontWeight: 700, fontFamily: "var(--ff-display)", letterSpacing: 6 }}>▶ ENGAGE</span>
-            </button> : phase === "done" ? <button onClick={run} style={{ background: "transparent", border: `1px solid ${g.c}25`, borderRadius: 3, padding: "8px 24px", color: g.c, fontSize: 10, fontFamily: "var(--ff-display)", letterSpacing: 4 }}>↻ RE-SCAN</button> : null}
+            </button> : phase === "done" ? <button onClick={handleEngage} style={{ background: "transparent", border: `1px solid ${g.c}25`, borderRadius: 3, padding: "8px 24px", color: g.c, fontSize: 10, fontFamily: "var(--ff-display)", letterSpacing: 4 }}>↻ RE-SCAN</button> : null}
           </div>
         </header>
 
@@ -752,11 +853,16 @@ export default function App() {
             {/* TARGETS */}
             {(Object.keys(targetsDone).length > 0 || scanTarget) && <div className="np-c12">
               <HudPanel title="INTERNATIONAL TARGETS" icon="🌐" status={scanTarget ? "active" : "done"} accent="#00b4d8" glow={!scanTarget && Object.keys(targetsDone).length > 0} delay={.3}>
-                <TargetGrid targets={targetsDone} activeId={scanTarget} />
+                {/* Connection type + scope badge */}
+                {connType && <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
+                  <span className="np-badge" style={{ color: "#00ffd5", borderColor: "rgba(0,255,213,.15)" }}>{CONN_TYPES.find(c => c.id === connType)?.icon} {CONN_TYPES.find(c => c.id === connType)?.label}</span>
+                  <span className="np-badge" style={{ color: "#00b4d8", borderColor: "rgba(0,180,216,.15)" }}>{SCAN_SCOPES.find(s => s.id === scanScope)?.icon} {SCAN_SCOPES.find(s => s.id === scanScope)?.label}</span>
+                </div>}
+                <TargetGrid targets={targetsDone} activeId={scanTarget} groups={activeGroups} />
                 {!scanTarget && Object.keys(targetsDone).length > 0 && <>
                   {/* Per-group summary */}
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 6, marginTop: 14, paddingTop: 10, borderTop: "1px solid rgba(255,255,255,.03)" }}>
-                    {TARGET_GROUPS.map(grp => {
+                    {activeGroups.map(grp => {
                       const gVals = grp.targets.map(t => targetsDone[t.id]).filter(r => r?.avg > 0);
                       const gAvg = gVals.length ? Math.round(gVals.reduce((a, r) => a + r.avg, 0) / gVals.length) : null;
                       const gColor = gAvg == null ? "rgba(255,255,255,.15)" : gAvg < 50 ? "#00ffd5" : gAvg < 100 ? "#c6ff00" : gAvg < 200 ? "#ffd600" : "#ff9100";

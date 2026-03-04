@@ -477,10 +477,10 @@ export function readResourceTiming() {
 // ═══════════════════════════════════════════════════════════════════════
 //  Engine I — International Target Reachability
 // ═══════════════════════════════════════════════════════════════════════
-export async function probeInternationalTargets(onTargetDone) {
-  const PROBES = 3;  // Reduced from 5 to keep total scan time reasonable with ~50 targets
+export async function probeInternationalTargets(onTargetDone, targetList) {
+  const PROBES = 3;
   const results = {};
-  for (const target of TARGETS) {
+  for (const target of (targetList || TARGETS)) {
     const samples = [];
     for (let i = 0; i < PROBES; i++) {
       const ms = await imageProbe(target.url, 5000);

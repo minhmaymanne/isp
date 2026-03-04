@@ -93,6 +93,21 @@ export const TARGET_GROUPS = [
 // Flat list for engine iteration
 export const TARGETS = TARGET_GROUPS.flatMap(g => g.targets);
 
+// Scan scope presets — maps usage profile to relevant target groups
+export const SCAN_SCOPES = [
+  { id: "full",   label: "Đầy đủ",     icon: "🔬", desc: "Quét tất cả 8 nhóm ứng dụng",           groups: null },
+  { id: "game",   label: "Chơi game",   icon: "🎮", desc: "Gaming, Cloud, Mạng xã hội, Tìm kiếm",  groups: ["gaming", "cloud", "social", "search"] },
+  { id: "work",   label: "Làm việc",    icon: "💼", desc: "Cloud, Dev Tools, AI, Tìm kiếm",         groups: ["cloud", "dev", "ai", "search"] },
+  { id: "fun",    label: "Giải trí",    icon: "🎬", desc: "Media, Mua sắm, Mạng xã hội, Gaming",   groups: ["media", "shopping", "social", "gaming"] },
+  { id: "social", label: "Mạng xã hội", icon: "💬", desc: "Mạng xã hội, Media, Mua sắm, AI",       groups: ["social", "media", "shopping", "ai"] },
+];
+
+export const CONN_TYPES = [
+  { id: "lan",  label: "LAN",         icon: "🔌", desc: "Cáp mạng Ethernet" },
+  { id: "wifi", label: "Wi-Fi",       icon: "📶", desc: "Mạng không dây" },
+  { id: "cell", label: "4G/5G LTE",   icon: "📡", desc: "Dữ liệu di động" },
+];
+
 export const COLO_MAP = {
   HAN: { city: "Hà Nội",     flag: "🇻🇳", vn: true },
   SGN: { city: "TP.HCM",     flag: "🇻🇳", vn: true },
