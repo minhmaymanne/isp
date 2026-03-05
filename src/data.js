@@ -65,12 +65,11 @@ export const TARGET_GROUPS = [
     { id: "tt_media",  name: "TikTok",     url: "https://www.tiktok.com/favicon.ico",            icon: "🎶" },
   ]},
   { id: "gaming", name: "GAMING", icon: "🎮", accent: "#76ff03", targets: [
-    { id: "steam",  name: "Steam",       url: "https://store.steampowered.com/favicon.ico",    icon: "🎮" },
-    { id: "garena", name: "Garena",      url: "https://www.garena.vn/favicon.ico",             icon: "🔥" },
-    { id: "riot",   name: "Riot Games",  url: "https://www.riotgames.com/favicon.ico",         icon: "⚔️" },
-    { id: "epic",   name: "Epic Games",  url: "https://store.epicgames.com/favicon.ico",       icon: "🏔️" },
-    { id: "roblox", name: "Roblox",      url: "https://www.roblox.com/favicon.ico",            icon: "🧱" },
-    { id: "mihoyo", name: "HoYoverse",   url: "https://www.hoyoverse.com/favicon.ico",         icon: "⭐" },
+    { id: "lienquan",  name: "Liên Quân",     url: "https://lienquan.garena.vn/favicon.ico",         icon: "⚔️" },
+    { id: "pubgm",     name: "PUBG Mobile",   url: "https://pubgmobile.vn/favicon.ico",              icon: "🔫" },
+    { id: "freefire",  name: "Free Fire",     url: "https://ff.garena.vn/favicon.ico",               icon: "🔥" },
+    { id: "wildrift",  name: "Tốc Chiến",     url: "https://wildrift.leagueoflegends.com/favicon.ico", icon: "🏆" },
+    { id: "vltk",      name: "Võ Lâm TK",     url: "https://volam.vn/favicon.ico",                   icon: "🗡️" },
   ]},
   { id: "dev", name: "DEV TOOLS", icon: "🐙", accent: "#b388ff", targets: [
     { id: "gh",            name: "GitHub",        url: "https://github.com/favicon.ico",                icon: "🐙" },
