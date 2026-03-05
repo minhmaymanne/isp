@@ -230,10 +230,10 @@ export function computeVerdicts(data) {
       detail: dl >= 50 ? "4K Ultra HD" : dl >= 25 ? "1080p HD" : dl >= 5 ? "SD Only" : "Buffering",
     },
     gaming: {
-      ok: lat <= 50 && jit <= 15,
+      ok: lat <= 80 && jit <= 20,
       label: "GAMING",
       icon: "🎮",
-      detail: lat <= 30 && jit <= 8 ? "Competitive" : lat <= 50 ? "Casual OK" : "High Lag",
+      detail: lat <= 20 && jit <= 5 ? "Pro Ready" : lat <= 40 && jit <= 10 ? "Competitive" : lat <= 60 ? "Casual OK" : lat <= 90 ? "Playable" : lat <= 150 ? "High Lag" : "Unplayable",
     },
     videoCall: {
       ok: dl >= 5 && ul >= 3 && lat <= 150,
