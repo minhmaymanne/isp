@@ -619,6 +619,32 @@ export default function App() {
     setPhase("done");
   }, [addLog]);
 
+  // Quick probe: only probe targets of a single group, skip everything else
+  const quickProbe = useCallback(async (group) => {
+    const targets = group.targets;
+    setPhase("running"); setPhaseIdx(4); setElapsed(0); setBooted(true);
+    setTrace(null); setGeo(null); setIspInfo(null); setColoInfo(null);
+    setLatencyData(null); setLatProg([]); setDlData(null); setUlData(null); setLoadedLat(null);
+    setDnsData(null); setTargetsDone({}); setScanTarget(null);
+    setGwData(null); setBloatData(null);
+    setFindings(null); setScoreData(null); setVerdicts(null);
+    setShowTrace(false); setShowGeo(false); setShowLatency(false);
+    setShowDl(false); setShowUl(false); setShowDns(false);
+    setShowAnalysis(false); setShowScore(false); setLogs([]);
+    setActiveGroups([group]); setScanProgress(0);
+    addLog(`Quick probe: ${group.icon} ${group.name} — ${targets.length} targets`, "sys");
+    setScanProgress(10);
+    await probeInternationalTargets((id, result) => {
+      setTargetsDone(p => ({ ...p, [id]: result }));
+      setScanTarget(id);
+      const t = targets.find(x => x.id === id);
+      addLog(`${t?.icon || "•"} ${t?.name || id}: ${result.avg ?? "timeout"}ms`, "ok");
+    }, targets);
+    setScanTarget(null); setScanProgress(100);
+    addLog("═══ QUICK PROBE COMPLETE ═══", "sys");
+    setPhase("done");
+  }, [addLog]);
+
   const fmtT = s => `${Math.floor(s / 60).toString().padStart(2, "0")}:${(s % 60).toString().padStart(2, "0")}`;
   const g = showScore && scoreData ? gradeOf(scoreData.value) : { c: "#00b4d8" };
 
@@ -735,6 +761,22 @@ export default function App() {
             {(phase === "idle" || phase === "done") && <button onClick={handleOpenSettings} style={{ background: "rgba(255,255,255,.03)", border: "1px solid rgba(255,255,255,.06)", borderRadius: 3, padding: "5px 14px", color: "rgba(255,255,255,.35)", fontSize: 9, fontFamily: "var(--ff-display)", letterSpacing: 2, cursor: "pointer", transition: "all .2s" }}>⚙ TÙY CHỌN</button>}
           </div>
         </header>
+
+        {/* QUICK ENGAGE — pick a single group to probe fast */}
+        {(phase === "idle" || phase === "done") && <div style={{ marginBottom: 14, animation: "hudIn .4s ease both" }}>
+          <div style={{ fontSize: 8, fontWeight: 700, color: "rgba(255,255,255,.2)", letterSpacing: 3, marginBottom: 8, fontFamily: "var(--ff-display)", textAlign: "center" }}>QUICK PROBE</div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center" }}>
+            {TARGET_GROUPS.map(g => (
+              <button key={g.id} onClick={() => quickProbe(g)} style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", borderRadius: 3, background: `${g.accent}0a`, border: `1px solid ${g.accent}20`, color: g.accent, fontSize: 10, fontFamily: "var(--ff-display)", fontWeight: 700, letterSpacing: 1, cursor: "pointer", transition: "all .2s" }}
+                onMouseEnter={e => { e.currentTarget.style.background = `${g.accent}18`; e.currentTarget.style.borderColor = `${g.accent}40`; e.currentTarget.style.boxShadow = `0 0 12px ${g.accent}15`; }}
+                onMouseLeave={e => { e.currentTarget.style.background = `${g.accent}0a`; e.currentTarget.style.borderColor = `${g.accent}20`; e.currentTarget.style.boxShadow = "none"; }}>
+                <span style={{ fontSize: 14 }}>{g.icon}</span>
+                <span>{g.name}</span>
+                <span style={{ fontSize: 8, color: "rgba(255,255,255,.2)" }}>{g.targets.length}</span>
+              </button>
+            ))}
+          </div>
+        </div>}
 
         {/* TIMELINE */}
         {(phase === "running" || phase === "done") && phaseIdx >= 0 && <div style={{ marginBottom: 14, animation: "hudIn .3s ease both" }}><PhaseTimeline phases={PHASES} currentIdx={phase === "done" ? PHASES.length : phaseIdx} progress={scanProgress} /></div>}
