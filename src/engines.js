@@ -543,25 +543,18 @@ export function readResourceTiming() {
 /** Race-probe multiple URLs, return the fastest response time */
 async function raceProbe(urls, timeout = 3000) {
   const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
   const results = await Promise.allSettled(
     urls.map(async url => {
-      const isIP = /^\d+\.\d+\.\d+\.\d+/.test(new URL(url).hostname);
       const t0 = performance.now();
-      if (isIP) {
-        await fetch(url, { mode: "no-cors", cache: "no-store", signal: controller.signal });
-      } else {
-        const img = new Image();
-        await new Promise((resolve, reject) => {
-          const timer = setTimeout(() => { img.src = ""; reject(new Error("timeout")); }, timeout);
-          img.onload = img.onerror = () => { clearTimeout(timer); resolve(); };
-          img.src = url + (url.includes("?") ? "&" : "?") + "_=" + Date.now() + Math.random();
-        });
-      }
-      const ms = performance.now() - t0;
-      return { url, ms };
+      await fetch(url, {
+        mode: "no-cors", cache: "no-store",
+        signal: controller.signal,
+      });
+      return { url, ms: performance.now() - t0 };
     })
   );
-  // Cancel remaining in-flight requests
+  clearTimeout(timeoutId);
   controller.abort();
   const successes = results.filter(r => r.status === "fulfilled").map(r => r.value);
   if (!successes.length) return null;
