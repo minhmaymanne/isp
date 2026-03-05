@@ -560,7 +560,7 @@ export async function probeInternationalTargets(onTargetDone, targetList) {
     const faviconHost = /^\d+\.\d+\.\d+\.\d+/.test(host) ? null : host;
 
     results[target.id] = {
-      avg: trimmed.length ? +mean(trimmed).toFixed(0) : null,
+      avg: valid.length ? +Math.min(...valid).toFixed(0) : null,
       jitter: trimmed.length > 1 ? +jitterCalc(trimmed).toFixed(0) : 0,
       loss: +(((PROBES - valid.length) / PROBES) * 100).toFixed(0),
       min: valid.length ? +Math.min(...valid).toFixed(0) : null,
