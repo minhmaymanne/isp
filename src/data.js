@@ -273,8 +273,8 @@ export const WAN_TARGETS = [
   { id: "gdns", label: "Google DNS",          url: "https://dns.google/resolve?name=test.com&type=A" },
 ];
 
-export const DL_SIZES = [100000, 500000, 1000000, 2000000, 5000000, 10000000];
-export const UL_SIZES = [100000, 500000, 1000000, 2000000];
+export const DL_SIZES = [100000, 500000, 1000000, 2000000, 5000000, 10000000, 25000000];
+export const UL_SIZES = [100000, 500000, 1000000, 2000000, 5000000];
 export const DNS_DOMAINS = ["cloudflare.com", "google.com", "facebook.com"];
 
 export const TRACE_URLS = [

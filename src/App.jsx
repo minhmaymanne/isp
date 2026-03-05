@@ -144,7 +144,26 @@ function RadarSweep({ size = 250, score, active }) {
 // ═══════════════════════════════════════════════════════════════════════
 function SpeedGauge({ value, max, label, unit, color = "#00ffd5", size = 135 }) {
   const [anim, setAnim] = useState(0);
-  useEffect(() => { if (value == null) return; let f = 0; const i = setInterval(() => { f += max / 55; if (f >= value) { setAnim(value); clearInterval(i); return; } setAnim(f); }, 22); return () => clearInterval(i); }, [value, max]);
+  const animRef = useRef(0);
+  useEffect(() => {
+    if (value == null) return;
+    const target = value;
+    const start = animRef.current;
+    const diff = target - start;
+    const duration = Math.min(Math.abs(diff) < 5 ? 120 : 350, 400);
+    const t0 = performance.now();
+    let raf;
+    const step = (now) => {
+      const p = Math.min((now - t0) / duration, 1);
+      const ease = 1 - Math.pow(1 - p, 3);
+      const v = start + diff * ease;
+      animRef.current = v;
+      setAnim(v);
+      if (p < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [value, max]);
   const r = size / 2 - 14, cx = size / 2, cy = size / 2, startA = 140, endA = 400, range = endA - startA;
   const pct = clamp((anim || 0) / max, 0, 1), valA = startA + pct * range;
   const arc = (f, t, R) => { const fr = f * Math.PI / 180, tr = t * Math.PI / 180; return `M${cx + R * Math.cos(fr)},${cy + R * Math.sin(fr)} A${R},${R} 0 ${t - f > 180 ? 1 : 0},1 ${cx + R * Math.cos(tr)},${cy + R * Math.sin(tr)}`; };
@@ -420,6 +439,8 @@ export default function App() {
   const [latProg, setLatProg] = useState([]);
   const [dlData, setDlData] = useState(null);
   const [ulData, setUlData] = useState(null);
+  const [dlTesting, setDlTesting] = useState(false);
+  const [ulTesting, setUlTesting] = useState(false);
   const [loadedLat, setLoadedLat] = useState(null);
   const [dnsData, setDnsData] = useState(null);
   const [targetsDone, setTargetsDone] = useState({});
@@ -485,7 +506,7 @@ export default function App() {
     // Reset all
     setPhase("booting"); setPhaseIdx(0); setElapsed(0); setBooted(false);
     setTrace(null); setGeo(null); setIspInfo(null); setColoInfo(null);
-    setLatencyData(null); setLatProg([]); setDlData(null); setUlData(null); setLoadedLat(null);
+    setLatencyData(null); setLatProg([]); setDlData(null); setUlData(null); setDlTesting(false); setUlTesting(false); setLoadedLat(null);
     setDnsData(null); setTargetsDone({}); setScanTarget(null);
     setGwData(null); setBloatData(null);
     setFindings(null); setScoreData(null); setVerdicts(null);
@@ -540,17 +561,23 @@ export default function App() {
 
     // Download (still phase 2)
     setScanProgress(30); addLog("Download bandwidth test...", "net");
+    setDlTesting(true);
     const dlRes = await measureDownload(p => {
       addLog(`Download sampling... ${Math.round(p.progress * 100)}%`, "net");
+      if (p.live) setDlData(p.live);
     });
+    setDlTesting(false);
     collected.download = dlRes; setDlData(dlRes); setShowDl(true);
     addLog(`Download: ${dlRes.mbps} Mbps (P90: ${dlRes.p90}, ${dlRes.samples} samples)`, "ok");
 
     // Upload (still phase 2)
     setScanProgress(45); addLog("Upload bandwidth test...", "net");
+    setUlTesting(true);
     const ulRes = await measureUpload(p => {
       addLog(`Upload sampling... ${Math.round(p.progress * 100)}%`, "net");
+      if (p.live) setUlData(p.live);
     });
+    setUlTesting(false);
     collected.upload = ulRes; setUlData(ulRes); setShowUl(true);
     addLog(`Upload: ${ulRes.mbps} Mbps (P90: ${ulRes.p90}, ${ulRes.samples} samples)`, "ok");
 
@@ -624,7 +651,7 @@ export default function App() {
     const targets = group.targets;
     setPhase("running"); setPhaseIdx(4); setElapsed(0); setBooted(true);
     setTrace(null); setGeo(null); setIspInfo(null); setColoInfo(null);
-    setLatencyData(null); setLatProg([]); setDlData(null); setUlData(null); setLoadedLat(null);
+    setLatencyData(null); setLatProg([]); setDlData(null); setUlData(null); setDlTesting(false); setUlTesting(false); setLoadedLat(null);
     setDnsData(null); setTargetsDone({}); setScanTarget(null);
     setGwData(null); setBloatData(null);
     setFindings(null); setScoreData(null); setVerdicts(null);
@@ -819,11 +846,11 @@ export default function App() {
             </div>}
 
             {/* SPEED */}
-            {(showDl || showUl || phaseIdx === 4 || phaseIdx === 5) && <div className="np-c6">
-              <HudPanel title="BANDWIDTH" icon="⚡" status={showUl ? "done" : "active"} accent="#7c4dff" glow={showDl && showUl} delay={.12}>
+            {(dlTesting || ulTesting || showDl || showUl || phaseIdx === 4 || phaseIdx === 5) && <div className="np-c6">
+              <HudPanel title="BANDWIDTH" icon="⚡" status={showDl && showUl ? "done" : "active"} accent="#7c4dff" glow={showDl && showUl} delay={.12}>
                 <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                  <SpeedGauge value={showDl ? dlData?.p90 : null} max={(() => { const v = dlData?.p90 || 0; return v > 2000 ? 10000 : v > 500 ? 5000 : v > 200 ? 1000 : v > 100 ? 500 : 200; })()} label="DOWNLOAD" unit="Mbps" color="#00ffd5" size={132} />
-                  <SpeedGauge value={showUl ? ulData?.p90 : null} max={(() => { const v = ulData?.p90 || 0; return v > 1000 ? 5000 : v > 200 ? 2000 : v > 100 ? 500 : v > 50 ? 200 : 100; })()} label="UPLOAD" unit="Mbps" color="#7c4dff" size={132} />
+                  <SpeedGauge value={(dlTesting || showDl) ? (dlData?.p90 ?? 0) : null} max={(() => { const v = dlData?.p90 || 0; return v > 2000 ? 10000 : v > 500 ? 5000 : v > 200 ? 1000 : v > 100 ? 500 : 200; })()} label="DOWNLOAD" unit="Mbps" color="#00ffd5" size={132} />
+                  <SpeedGauge value={(ulTesting || showUl) ? (ulData?.p90 ?? 0) : null} max={(() => { const v = ulData?.p90 || 0; return v > 1000 ? 5000 : v > 200 ? 2000 : v > 100 ? 500 : v > 50 ? 200 : 100; })()} label="UPLOAD" unit="Mbps" color="#7c4dff" size={132} />
                 </div>
                 {showDl && showUl && <>
                   <div style={{ display: "flex", justifyContent: "center", gap: 10, marginTop: 8, flexWrap: "wrap" }}>

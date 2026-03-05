@@ -329,7 +329,7 @@ export async function measureDownload(onProgress) {
   let totalAttempts = 0, failedAttempts = 0;
   for (let si = 0; si < DL_SIZES.length; si++) {
     const size = DL_SIZES[si];
-    const iterations = size <= 500000 ? 3 : 2;
+    const iterations = size <= 500000 ? 4 : 3;
     for (let i = 0; i < iterations; i++) {
       totalAttempts++;
       try {
@@ -345,12 +345,14 @@ export async function measureDownload(onProgress) {
           samples.push(mbps);
         }
       } catch { failedAttempts++; }
+      const liveResult = calculateSpeedResult(samples, totalAttempts, failedAttempts);
+      onProgress?.({
+        phase: "download",
+        progress: (si * iterations + i + 1) / (DL_SIZES.length * iterations),
+        currentSamples: samples.length,
+        live: liveResult,
+      });
     }
-    onProgress?.({
-      phase: "download",
-      progress: (si + 1) / DL_SIZES.length,
-      currentSamples: samples.length,
-    });
   }
   return calculateSpeedResult(samples, totalAttempts, failedAttempts);
 }
@@ -360,7 +362,7 @@ export async function measureUpload(onProgress) {
   let totalAttempts = 0, failedAttempts = 0;
   for (let si = 0; si < UL_SIZES.length; si++) {
     const size = UL_SIZES[si];
-    const iterations = size <= 500000 ? 3 : 2;
+    const iterations = size <= 500000 ? 4 : 3;
     for (let i = 0; i < iterations; i++) {
       totalAttempts++;
       try {
@@ -376,12 +378,14 @@ export async function measureUpload(onProgress) {
           samples.push(mbps);
         }
       } catch { failedAttempts++; }
+      const liveResult = calculateSpeedResult(samples, totalAttempts, failedAttempts);
+      onProgress?.({
+        phase: "upload",
+        progress: (si * iterations + i + 1) / (UL_SIZES.length * iterations),
+        currentSamples: samples.length,
+        live: liveResult,
+      });
     }
-    onProgress?.({
-      phase: "upload",
-      progress: (si + 1) / UL_SIZES.length,
-      currentSamples: samples.length,
-    });
   }
   return calculateSpeedResult(samples, totalAttempts, failedAttempts);
 }
