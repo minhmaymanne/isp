@@ -588,11 +588,10 @@ export async function probeInternationalTargets(onTargetDone, targetList) {
         if (i < PROBES - 1) await sleep(80);
       }
     } else {
-      // Regular service probe
-      const isIP = /^\d+\.\d+\.\d+\.\d+/.test(new URL(target.url).hostname);
-      const probe = isIP ? fetchProbe : imageProbe;
+      // Regular service probe — fetchProbe (HEAD no-cors) is faster and
+      // more accurate than imageProbe which includes image download time
       for (let i = 0; i < PROBES; i++) {
-        const ms = await probe(target.url, 5000);
+        const ms = await fetchProbe(target.url, 5000);
         if (ms > 2) samples.push(ms);
         if (i < PROBES - 1) await sleep(80);
       }
