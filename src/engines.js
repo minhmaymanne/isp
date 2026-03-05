@@ -545,20 +545,29 @@ export function readResourceTiming() {
 // ═══════════════════════════════════════════════════════════════════════
 
 export async function probeInternationalTargets(onTargetDone, targetList) {
-  const PROBES = 5;
+  const PROBES = 8;
+  const targets = targetList || TARGETS;
   const results = {};
-  for (const target of (targetList || TARGETS)) {
+
+  // Warmup: parallel DNS + TLS handshake for all targets (discarded)
+  await Promise.allSettled(
+    targets.map(t => fetch(t.url, { method: "HEAD", mode: "no-cors", cache: "no-store", signal: AbortSignal.timeout(4000) }).catch(() => {}))
+  );
+  await sleep(50);
+
+  for (const target of targets) {
     const samples = [];
 
     for (let i = 0; i < PROBES; i++) {
       const ms = await fetchProbe(target.url, 5000);
       if (ms > 2) samples.push(ms);
-      if (i < PROBES - 1) await sleep(80);
+      if (i < PROBES - 1) await sleep(30);
     }
 
     const valid = samples.filter(s => s > 2);
     const sorted = [...valid].sort((a, b) => a - b);
-    const trimmed = sorted.length >= 4 ? sorted.slice(1, -1) : sorted;
+    // Trim top 2 outliers for jitter calc
+    const trimmed = sorted.length >= 5 ? sorted.slice(0, -2) : sorted;
 
     const host = new URL(target.url).hostname;
     const faviconHost = /^\d+\.\d+\.\d+\.\d+/.test(host) ? null : host;
