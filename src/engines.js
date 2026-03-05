@@ -569,7 +569,7 @@ export async function probeInternationalTargets(onTargetDone, targetList) {
     // Trim top 2 outliers for jitter calc
     const trimmed = sorted.length >= 5 ? sorted.slice(0, -2) : sorted;
 
-    const host = new URL(target.url).hostname;
+    const host = target.faviconDomain || new URL(target.url).hostname;
     const faviconHost = /^\d+\.\d+\.\d+\.\d+/.test(host) ? null : host;
 
     results[target.id] = {
