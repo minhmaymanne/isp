@@ -65,11 +65,11 @@ export const TARGET_GROUPS = [
     { id: "tt_media",  name: "TikTok",     url: "https://www.tiktok.com/favicon.ico",            icon: "🎶" },
   ]},
   { id: "gaming", name: "GAMING", icon: "🎮", accent: "#76ff03", targets: [
-    { id: "lienquan",  name: "Liên Quân",     url: "http://45.119.241.228/favicon.ico",              icon: "⚔️" },
-    { id: "pubgm",     name: "PUBG Mobile",   url: "https://pubgmobile.vn/favicon.ico",              icon: "🔫" },
-    { id: "freefire",  name: "Free Fire",     url: "https://ff.garena.vn/favicon.ico",               icon: "🔥" },
-    { id: "wildrift",  name: "Tốc Chiến",     url: "https://wildrift.leagueoflegends.com/favicon.ico", icon: "🏆" },
-    { id: "vltk",      name: "Võ Lâm TK",     url: "https://volam.vn/favicon.ico",                   icon: "🗡️" },
+    { id: "lienquan",  name: "Liên Quân",     urls: ["http://45.119.241.228", "http://103.200.120.105", "https://lienquan.garena.vn/favicon.ico"], icon: "⚔️" },
+    { id: "pubgm",     name: "PUBG Mobile",   urls: ["http://14.160.26.174", "https://pubgmobile.vn/favicon.ico"],              icon: "🔫" },
+    { id: "freefire",  name: "Free Fire",     urls: ["http://203.205.28.29", "https://ff.garena.vn/favicon.ico"],               icon: "🔥" },
+    { id: "wildrift",  name: "Tốc Chiến",     urls: ["http://103.200.120.105", "https://wildrift.leagueoflegends.com/favicon.ico"], icon: "🏆" },
+    { id: "vltk",      name: "Võ Lâm TK",     urls: ["http://115.84.177.20", "https://volam.vn/favicon.ico"],                   icon: "🗡️" },
   ]},
   { id: "dev", name: "DEV TOOLS", icon: "🐙", accent: "#b388ff", targets: [
     { id: "gh",            name: "GitHub",        url: "https://github.com/favicon.ico",                icon: "🐙" },

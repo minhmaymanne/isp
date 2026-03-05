@@ -539,23 +539,79 @@ export function readResourceTiming() {
 // ═══════════════════════════════════════════════════════════════════════
 //  Engine I — International Target Reachability
 // ═══════════════════════════════════════════════════════════════════════
+
+/** Race-probe multiple URLs, return the fastest response time */
+async function raceProbe(urls, timeout = 3000) {
+  const controller = new AbortController();
+  const results = await Promise.allSettled(
+    urls.map(async url => {
+      const isIP = /^\d+\.\d+\.\d+\.\d+/.test(new URL(url).hostname);
+      const t0 = performance.now();
+      if (isIP) {
+        await fetch(url, { mode: "no-cors", cache: "no-store", signal: controller.signal });
+      } else {
+        const img = new Image();
+        await new Promise((resolve, reject) => {
+          const timer = setTimeout(() => { img.src = ""; reject(new Error("timeout")); }, timeout);
+          img.onload = img.onerror = () => { clearTimeout(timer); resolve(); };
+          img.src = url + (url.includes("?") ? "&" : "?") + "_=" + Date.now() + Math.random();
+        });
+      }
+      const ms = performance.now() - t0;
+      return { url, ms };
+    })
+  );
+  // Cancel remaining in-flight requests
+  controller.abort();
+  const successes = results.filter(r => r.status === "fulfilled").map(r => r.value);
+  if (!successes.length) return null;
+  return successes.reduce((a, b) => a.ms < b.ms ? a : b);
+}
+
 export async function probeInternationalTargets(onTargetDone, targetList) {
   const PROBES = 5;
   const results = {};
   for (const target of (targetList || TARGETS)) {
-    const isIP = /^\d+\.\d+\.\d+\.\d+/.test(new URL(target.url).hostname);
-    const probe = isIP ? fetchProbe : imageProbe;
+    // Game targets have `urls` array, regular targets have `url` string
+    const isGame = Array.isArray(target.urls);
     const samples = [];
-    for (let i = 0; i < PROBES; i++) {
-      const ms = await probe(target.url, 5000);
-      if (ms > 2) samples.push(ms);
-      if (i < PROBES - 1) await sleep(80);
+    let bestServer = null;
+
+    if (isGame) {
+      // Game probe: race all URLs each round, pick fastest
+      for (let i = 0; i < PROBES; i++) {
+        const winner = await raceProbe(target.urls, 3000);
+        if (winner && winner.ms > 2) {
+          samples.push(winner.ms);
+          if (!bestServer) bestServer = winner.url;
+        }
+        if (i < PROBES - 1) await sleep(80);
+      }
+    } else {
+      // Regular service probe
+      const isIP = /^\d+\.\d+\.\d+\.\d+/.test(new URL(target.url).hostname);
+      const probe = isIP ? fetchProbe : imageProbe;
+      for (let i = 0; i < PROBES; i++) {
+        const ms = await probe(target.url, 5000);
+        if (ms > 2) samples.push(ms);
+        if (i < PROBES - 1) await sleep(80);
+      }
     }
+
     const valid = samples.filter(s => s > 2);
     const sorted = [...valid].sort((a, b) => a - b);
-    // Drop first (DNS/TLS overhead) and last (outlier) if enough samples
     const trimmed = sorted.length >= 4 ? sorted.slice(1, -1) : sorted;
-    const faviconHost = isIP ? null : new URL(target.url).hostname;
+
+    // Favicon: find best domain for Google favicon service
+    let faviconHost = null;
+    if (isGame) {
+      const domainUrl = target.urls.find(u => !/^\d+\.\d+\.\d+\.\d+/.test(new URL(u).hostname));
+      if (domainUrl) faviconHost = new URL(domainUrl).hostname;
+    } else {
+      const host = new URL(target.url).hostname;
+      if (!/^\d+\.\d+\.\d+\.\d+/.test(host)) faviconHost = host;
+    }
+
     results[target.id] = {
       avg: trimmed.length ? +mean(trimmed).toFixed(0) : null,
       jitter: trimmed.length > 1 ? +jitterCalc(trimmed).toFixed(0) : 0,
@@ -563,6 +619,7 @@ export async function probeInternationalTargets(onTargetDone, targetList) {
       min: valid.length ? +Math.min(...valid).toFixed(0) : null,
       max: valid.length ? +Math.max(...valid).toFixed(0) : null,
       favicon: faviconHost ? `https://www.google.com/s2/favicons?domain=${faviconHost}&sz=32` : null,
+      server: bestServer ? new URL(bestServer).hostname : null,
     };
     onTargetDone?.(target.id, results[target.id]);
   }
