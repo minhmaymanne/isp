@@ -546,6 +546,7 @@ export function readResourceTiming() {
 
 export async function probeInternationalTargets(onTargetDone, targetList) {
   const PROBES = 8;
+  const CONCURRENCY = 3;
   const targets = targetList || TARGETS;
   const results = {};
 
@@ -555,9 +556,9 @@ export async function probeInternationalTargets(onTargetDone, targetList) {
   );
   await sleep(50);
 
-  for (const target of targets) {
+  // Probe a single target (8 samples)
+  async function probeOne(target) {
     const samples = [];
-
     for (let i = 0; i < PROBES; i++) {
       const ms = await fetchProbe(target.url, 5000);
       if (ms > 2) samples.push(ms);
@@ -566,7 +567,6 @@ export async function probeInternationalTargets(onTargetDone, targetList) {
 
     const valid = samples.filter(s => s > 2);
     const sorted = [...valid].sort((a, b) => a - b);
-    // Trim top 2 outliers for jitter calc
     const trimmed = sorted.length >= 5 ? sorted.slice(0, -2) : sorted;
 
     const host = target.faviconDomain || new URL(target.url).hostname;
@@ -582,6 +582,13 @@ export async function probeInternationalTargets(onTargetDone, targetList) {
     };
     onTargetDone?.(target.id, results[target.id]);
   }
+
+  // Process targets in batches of CONCURRENCY
+  for (let i = 0; i < targets.length; i += CONCURRENCY) {
+    const batch = targets.slice(i, i + CONCURRENCY);
+    await Promise.all(batch.map(probeOne));
+  }
+
   return results;
 }
 
