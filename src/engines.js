@@ -43,16 +43,21 @@ function computeStats(valid) {
 
 // ── Probe utilities ────────────────────────────────────────────────────
 export async function fetchProbe(url, timeout = 7000) {
+  const t0 = performance.now();
   try {
-    const t0 = performance.now();
     await fetch(url, {
       method: "HEAD",
       mode: "no-cors",
       cache: "no-store",
       signal: AbortSignal.timeout(timeout),
     });
-    return performance.now() - t0;
-  } catch { return -1; }
+  } catch {
+    const elapsed = performance.now() - t0;
+    // If error came back too fast (<2ms), server likely refused instantly — not a real RTT
+    if (elapsed < 2) return -1;
+    return elapsed; // network error but still measures RTT to server
+  }
+  return performance.now() - t0;
 }
 
 export function imageProbe(url, timeout = 6000) {
@@ -66,6 +71,7 @@ export function imageProbe(url, timeout = 6000) {
     img.src = url + (url.includes("?") ? "&" : "?") + "_t=" + Date.now() + Math.random();
   });
 }
+
 
 // ═══════════════════════════════════════════════════════════════════════
 //  Engine G — Cloudflare Trace
@@ -537,22 +543,26 @@ export async function probeInternationalTargets(onTargetDone, targetList) {
   const PROBES = 5;
   const results = {};
   for (const target of (targetList || TARGETS)) {
+    const isIP = /^\d+\.\d+\.\d+\.\d+/.test(new URL(target.url).hostname);
+    const probe = isIP ? fetchProbe : imageProbe;
     const samples = [];
     for (let i = 0; i < PROBES; i++) {
-      const ms = await imageProbe(target.url, 5000);
-      if (ms > 0) samples.push(ms);
+      const ms = await probe(target.url, 5000);
+      if (ms > 2) samples.push(ms); // filter out <2ms (unrealistic, likely instant error)
       if (i < PROBES - 1) await sleep(80);
     }
-    const valid = samples.filter(s => s > 0);
-    // Drop the worst (first probe often has DNS/TLS overhead) and use best result
-    const best = valid.length >= 3 ? [...valid].sort((a, b) => a - b).slice(0, -1) : valid;
+    const valid = samples.filter(s => s > 2);
+    const sorted = [...valid].sort((a, b) => a - b);
+    // Drop first (DNS/TLS overhead) and last (outlier) if enough samples
+    const trimmed = sorted.length >= 4 ? sorted.slice(1, -1) : sorted;
+    const faviconHost = isIP ? null : new URL(target.url).hostname;
     results[target.id] = {
-      avg: best.length ? +Math.min(...best).toFixed(0) : null,
-      jitter: best.length > 1 ? +jitterCalc(best).toFixed(0) : 0,
+      avg: trimmed.length ? +mean(trimmed).toFixed(0) : null,
+      jitter: trimmed.length > 1 ? +jitterCalc(trimmed).toFixed(0) : 0,
       loss: +(((PROBES - valid.length) / PROBES) * 100).toFixed(0),
       min: valid.length ? +Math.min(...valid).toFixed(0) : null,
       max: valid.length ? +Math.max(...valid).toFixed(0) : null,
-      favicon: `https://www.google.com/s2/favicons?domain=${new URL(target.url).hostname}&sz=32`,
+      favicon: faviconHost ? `https://www.google.com/s2/favicons?domain=${faviconHost}&sz=32` : null,
     };
     onTargetDone?.(target.id, results[target.id]);
   }
