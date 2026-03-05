@@ -65,12 +65,12 @@ export const TARGET_GROUPS = [
     { id: "tt_media",  name: "TikTok",     url: "https://www.tiktok.com/favicon.ico",            icon: "🎶" },
   ]},
   { id: "gaming", name: "GAMING", icon: "🎮", accent: "#76ff03", targets: [
-    { id: "garena",    name: "Garena",        url: "https://www.garena.vn/favicon.ico",              icon: "⚔️" },
-    { id: "steam",     name: "Steam",         url: "https://store.steampowered.com/favicon.ico",     icon: "🎮" },
-    { id: "riot",      name: "Riot Games",    url: "https://www.riotgames.com/favicon.ico",          icon: "🏆" },
-    { id: "roblox",    name: "Roblox",        url: "https://www.roblox.com/favicon.ico",             icon: "🧱" },
-    { id: "epic",      name: "Epic Games",    url: "https://www.epicgames.com/favicon.ico",          icon: "🔥" },
-    { id: "nintendo",  name: "Nintendo",      url: "https://www.nintendo.com/favicon.ico",           icon: "🍄" },
+    { id: "lienquan",  name: "Liên Quân",     url: "https://lienquan.garena.vn/",                    icon: "⚔️" },
+    { id: "freefire",  name: "Free Fire",     url: "https://www.garena.vn/",                         icon: "🔥" },
+    { id: "pubgm",     name: "PUBG Mobile",   url: "https://vnggames.com/",                          icon: "🔫" },
+    { id: "tocchien",  name: "Tốc Chiến",     url: "https://tocchien.vnggames.com/",                 icon: "🏆" },
+    { id: "vltk",      name: "Võ Lâm TK",     url: "https://volamm.vnggames.com/",                   icon: "🗡️" },
+    { id: "genshin",   name: "Genshin Impact", url: "https://genshin.hoyoverse.com/",                icon: "✨" },
   ]},
   { id: "dev", name: "DEV TOOLS", icon: "🐙", accent: "#b388ff", targets: [
     { id: "gh",            name: "GitHub",        url: "https://github.com/favicon.ico",                icon: "🐙" },
