@@ -540,69 +540,24 @@ export function readResourceTiming() {
 //  Engine I — International Target Reachability
 // ═══════════════════════════════════════════════════════════════════════
 
-/** Race-probe multiple URLs, return the fastest response time */
-async function raceProbe(urls, timeout = 3000) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeout);
-  const results = await Promise.allSettled(
-    urls.map(async url => {
-      const t0 = performance.now();
-      await fetch(url, {
-        mode: "no-cors", cache: "no-store",
-        signal: controller.signal,
-      });
-      return { url, ms: performance.now() - t0 };
-    })
-  );
-  clearTimeout(timeoutId);
-  controller.abort();
-  const successes = results.filter(r => r.status === "fulfilled").map(r => r.value);
-  if (!successes.length) return null;
-  return successes.reduce((a, b) => a.ms < b.ms ? a : b);
-}
-
 export async function probeInternationalTargets(onTargetDone, targetList) {
   const PROBES = 5;
   const results = {};
   for (const target of (targetList || TARGETS)) {
-    // Game targets have `urls` array, regular targets have `url` string
-    const isGame = Array.isArray(target.urls);
     const samples = [];
-    let bestServer = null;
 
-    if (isGame) {
-      // Game probe: race all URLs each round, pick fastest
-      for (let i = 0; i < PROBES; i++) {
-        const winner = await raceProbe(target.urls, 3000);
-        if (winner && winner.ms > 2) {
-          samples.push(winner.ms);
-          if (!bestServer) bestServer = winner.url;
-        }
-        if (i < PROBES - 1) await sleep(80);
-      }
-    } else {
-      // Regular service probe — fetchProbe (HEAD no-cors) is faster and
-      // more accurate than imageProbe which includes image download time
-      for (let i = 0; i < PROBES; i++) {
-        const ms = await fetchProbe(target.url, 5000);
-        if (ms > 2) samples.push(ms);
-        if (i < PROBES - 1) await sleep(80);
-      }
+    for (let i = 0; i < PROBES; i++) {
+      const ms = await fetchProbe(target.url, 5000);
+      if (ms > 2) samples.push(ms);
+      if (i < PROBES - 1) await sleep(80);
     }
 
     const valid = samples.filter(s => s > 2);
     const sorted = [...valid].sort((a, b) => a - b);
     const trimmed = sorted.length >= 4 ? sorted.slice(1, -1) : sorted;
 
-    // Favicon: find best domain for Google favicon service
-    let faviconHost = null;
-    if (isGame) {
-      const domainUrl = target.urls.find(u => !/^\d+\.\d+\.\d+\.\d+/.test(new URL(u).hostname));
-      if (domainUrl) faviconHost = new URL(domainUrl).hostname;
-    } else {
-      const host = new URL(target.url).hostname;
-      if (!/^\d+\.\d+\.\d+\.\d+/.test(host)) faviconHost = host;
-    }
+    const host = new URL(target.url).hostname;
+    const faviconHost = /^\d+\.\d+\.\d+\.\d+/.test(host) ? null : host;
 
     results[target.id] = {
       avg: trimmed.length ? +mean(trimmed).toFixed(0) : null,
@@ -611,7 +566,6 @@ export async function probeInternationalTargets(onTargetDone, targetList) {
       min: valid.length ? +Math.min(...valid).toFixed(0) : null,
       max: valid.length ? +Math.max(...valid).toFixed(0) : null,
       favicon: faviconHost ? `https://www.google.com/s2/favicons?domain=${faviconHost}&sz=32` : null,
-      server: bestServer ? new URL(bestServer).hostname : null,
     };
     onTargetDone?.(target.id, results[target.id]);
   }
